@@ -1,0 +1,1536 @@
+import requests
+import json
+import re
+import sys
+import csv
+import time
+import hashlib
+import datetime
+import binascii
+import urllib.parse
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+from base64 import b64encode
+
+#{{{loginFunction(session) this function logs in returns nothing
+def loginFunction(session):
+    url1 = "*******************REDACTED********************"
+    payload1 = {'username':"***************************************",'password':"***************************************"}
+
+    post1 = session.post(url1,data=payload1,verify=False)
+
+    return
+
+    #}}}
+
+#{{{ coreFunction(session,dataFromSheet,mode,sms,smsServer,check_parameter) returns nothing
+def coreFunction(session,dataFromSheet,mode,sms,smsServer,check_parameter):
+    print("I am inside coreFunction")
+    #url1 = "*******************REDACTED********************"
+    #payload1 = {'username':"***************************************",'password':"***************************************"}
+
+
+    #print("Enter srf_id")
+    #srf_id = dataFromSheet[2] 
+
+    #with requests.Session() as session:
+        #post1 = session.post(url1,data=payload1,verify=False)
+
+    #url2 = "*******************REDACTED********************"
+    #payload2 = {"srf_id":srf_id,"srf_patient_id":"","srf_icmr_id":"0","srf_repeat_sample":"0"}
+
+    url3 = "*******************REDACTED********************"
+    #{{{nameValuePairs from csv file
+    nameValuePairs = {
+            "patient_id":dataFromSheet[6],	
+            "patient_name":dataFromSheet[15].split("(")[0],	
+            "age_in":dataFromSheet[17].split()[1],	
+            "age":dataFromSheet[17].split()[0],	
+            "gender":dataFromSheet[18][0],	
+            "contact_number":dataFromSheet[32],	
+            "contact_number_belongs_to":dataFromSheet[33],	
+            "email":"",	
+            "aadhar_number":"",	
+            "passport_number":"",	
+            "nationality":dataFromSheet[15].split(" ")[-1].replace("(","").replace(")",""),	
+            "state": findStateReverse(dataFromSheet[2]),	
+            "district": findDistrictReverse(dataFromSheet[3]),	
+            "address":dataFromSheet[20],	
+            "village_town":"",	
+            "pincode":"",	
+            "aarogya_setu_app_downloaded":"No",	
+            "date_of_arrival_in_india":"",	
+            "quarantined":"No",	
+            "otp_verified_srf":"V",	
+            "final_status":"",	
+            "patient_category":getPatientCategory(dataFromSheet[24]),	
+            "sample_cdate":getCollectionDate(dataFromSheet[28]),	
+            "sample_type":"Nasopharyngeal_Oropharyngeal",	
+            "status":getSymptomaticStatus(dataFromSheet[24]),	
+            "other_underlying_medical_conditions":dataFromSheet[21].split(","),	
+            "hospitalization_date":"",	
+            "hospital_state":"",	
+            "hospital_id":"",	
+            "doctor_mobile":"",	
+            "sample_tdate":dataFromSheet[10],	
+            "covid19_result_egene":getResultForGene(dataFromSheet[13],dataFromSheet[7],"covid19_result_egene"),	
+            "orf1b_confirmatory":getResultForGene(dataFromSheet[13],dataFromSheet[7],"orf1b_confirmatory"),	
+            "rdrp_confirmatory":getResultForGene(dataFromSheet[13],dataFromSheet[7],"rdrp_confirmatory"),	
+            "final_result_of_sample":dataFromSheet[7],	
+            "inf_a":"",	
+            "pinf":"",	
+            "h_metapneumovirus":"",	
+            "other_test_conducted":"",	
+            "result_of_other_test":"",	
+            "sample_rdate":dataFromSheet[9],	
+            "sample_id":dataFromSheet[6],	
+            "date_of_onset_of_symptoms":"",	
+            "hospitalized":isPatientHospitalized(dataFromSheet[25]),	
+            "hospital_name":dataFromSheet[26],	
+            "hospital_district":"",	
+            "doctor_name":"",	
+            "doctor_email":"",	
+            "testing_kit_used":getLabKit(dataFromSheet[13]),	
+            "ct_value_screening":dataFromSheet[11],	
+            "ct_value_orf1b":dataFromSheet[14],	
+            "ct_value_rdrp":dataFromSheet[12],	
+            "repeat_sample":"No",	
+            "inf_b":"",	
+            "rsv":"",	
+            "adenovirus":"",	
+            "rhinovirus":"",	
+            "remarks":"",	
+            "srf_id":dataFromSheet[8],	
+            "page":getPage(mode)
+            }
+            #}}}
+    
+#{{{ Commented Obtaining the already entered data 
+    """
+    post2 = session.post(url2,data=payload2,verify=False)
+    print("Iam printing post2_text")
+    post2_text = post2.text
+    #print(post2_text)
+
+    req_lines = findRequiredLine(post2_text)
+    print(req_lines)
+    #print(len(req_lines))
+
+    nameValuePairs = {'symptoms[]':[],'underlying_medical_condition[]':[]} 
+
+    for i in req_lines:
+        for j in (i.split(";")):
+            #print(j.split("."))
+            k = j.split(".")
+            #print("length of k is %d",len(k))
+            try:
+                if k[0][0] == "$": # if the first charecter in the string is $
+                    name = k[0].replace("$('#","").replace("')","")
+                if k[1][0] == "v": # if the first charecter in the string is v
+                    key = k[1].replace("val('","").replace("')","") 
+                elif k[1][0] == "p": # if the first charecter in the string is p, then it should be either a checkbox or radio button
+                    #{{{ age_in conditional
+                    if (name == "age_year" or name == "age_month" or name == "age_day"): # conditionals to see if the radio button is "age_in"
+                        if (name == "age_year"):
+                            key = "Years" 
+                        elif (name == "age_month"):
+                            key = "Months"
+                        elif (name == "age_day"):
+                            key = "Days"
+                        name = "age_in" # the name is being changed after the set of if elif statements 
+
+                    #}}}
+                    #{{{ patient_category conditional
+                    elif (re.match(r'^(cat[1-9])[ab]?', name) != None or name == "others"):
+                        if (name == "cat1"):
+                            key = "Cat1"
+                        elif (name == "cat2"):
+                            key = "Cat2"
+                        elif (name == "cat3"):
+                            key = "Cat3"
+                        elif (name == "cat4"):
+                            key = "Cat4"
+                        elif (name == "cat5a"):
+                            key = "Cat5a"
+                        elif (name == "cat5b"):
+                            key = "Cat5b"
+                        elif (name == "cat6"):
+                            key = "Cat6"
+                        elif (name == "cat7"):
+                            key = "Cat7"
+                        elif (name == "cat8"):
+                            key = "Cat8"
+                        elif (name == "cat9"):
+                            key = "Cat9"
+                        elif (name == "others"):
+                            key = "others"
+                        name = "patient_category"
+
+                    #}}}
+                    #{{{ symptoms[] conditional
+                    elif(name == "fever" or name == "cough" or name == "diarrhoea" or name == "abdominal_pain" or  name == "breathlessness" or name == "nausea" or name == "vomiting" or name == "sore_throat" or name == "body_ach" or name == "nasal_discharge" or name == "haemoptsis" or name == "chest_pain"):
+                        nameValuePairs["symptoms[]"].append(name)
+                        name = "symptoms[]"
+
+                    #}}}
+                    #{{{ underlying_medical_condition[] conditional
+                    elif (name == "chronic_lung_disease" or name == "chronic_renal_disease" or name == "diabetes" or name == "chronic_liver_disease" or name == "heart_disease" or name == "malignancy" or name == "hypertension" or name == "immunocompromised" or name == "other"):
+                        if (name == "chronic_lung_disease"):
+                            key = "Chronic Lung Disease"
+                        elif (name == "chronic_renal_disease"):
+                            key = "Chronic Renal Disease"
+                        elif (name == "diabetes"):
+                            key = "Diabetes"
+                        elif (name == "chronic_liver_disease"):
+                            key = "Chronic Liver Disease"
+                        elif (name == "heart_disease"):
+                            key = "Heart Disease"
+                        elif (name == "malignancy"):
+                            key = "Malignancy"
+                        elif (name == "hypertension"):
+                            key = "Hypertension"
+                        elif (name == "immunocompromised"):
+                            key = "Immunocompromised"
+                        elif (name == "other"):
+                            key = "Other"
+
+                        nameValuePairs["underlying_medical_condition[]"].append(key)
+                        name = "underlying_medical_condition[]"
+                    #}}}
+                    
+
+
+
+                if (name != "symptoms[]" and name != "underlying_medical_condition[]"):
+                    nameValuePairs[name] = key
+            except IndexError:
+                pass
+    print("I am before testing kit")
+#{{{ Testing kit
+
+    # the data in the column H is the name of the kit used, assuming that there will be errors, it should be preprocessed to strip any white spaces and then converted to all upper case 
+    try:
+        whitespaceRegex = re.compile(r'\s+') # regex pattern for catching one or more whitespaces
+        kitWithWhiteSpaceRemoved = re.sub(whitespaceRegex,'',dataFromSheet[7]) # substitute the whitespaces with ''
+        kitNameCapitalized = kitWithWhiteSpaceRemoved.upper() # change the string to uppercase
+        print(kitNameCapitalized)
+        if (kitNameCapitalized == "LABGUN"): #Originally its posted value should be 'Labgun'
+            nameValuePairs["testing_kit_used"] = "Labgun"
+
+            
+        elif(kitNameCapitalized == "FASTRACT"): #Originally its posted value should be 'Fastract_SARS_kit'
+            print("I am inside elif")
+            nameValuePairs["testing_kit_used"] = "Fastract_SARS_kit"
+
+        elif(kitNameCapitalized == "SDBIOSENSOR"): #Originally its posted value should be 'SD_Biosensor'
+            print("I am inside elif sd biosensor")
+            nameValuePairs["testing_kit_used"] = "SD_Biosensor"
+
+        elif(kitNameCapitalized == "BIOMERIEUX"): #Originally its posted value should be 'Biomerieux_ARGENE'
+            print("I am inside elif biomerieux")
+            nameValuePairs["testing_kit_used"] = "Biomerieux_ARGENE"
+
+        elif(kitNameCapitalized == "EXOFAST"): #Originally its posted value should be 'LabGun-tm_ExoFast'
+            print("I am inside elif exofast")
+            nameValuePairs["testing_kit_used"] = "LabGun-tm_ExoFast"
+
+
+        
+        
+
+        print(nameValuePairs["testing_kit_used"])
+    except:
+        pass
+
+    #}}}
+
+
+    #nameValuePairs["sample_type"] = "Nasopharyngeal swab"
+    nameValuePairs["sample_type"] = "Nasopharyngeal_Oropharyngeal" # changed to both nasopharyngeal and orophrangeal on Health Secretary's Instruction
+    print("my state code is")
+    #print(nameValuePairs["state"])
+    print("I am here")
+    #To check if a record is complete, check if the nameValuePairs dictionary contains the key "state"
+    try:
+        state = findState(nameValuePairs["state"])
+        print(state)
+    except:
+        print("I am in exception")
+        return ["Failed","Incomplete Record: State Not Found"]
+
+    #To check if a record is complete, check if the nameValuePairs dictionary contains the key "district"
+    
+    try:
+        dist = findDistrict(nameValuePairs["district"])
+        print(dist)
+    except:
+        return ["Failed","Incomplete Record: District Not Found"]
+
+    print("Fetched from add_record page")
+    print(nameValuePairs)
+    
+    """
+    #}}}
+
+    if (mode == "1"): # the program is in add_record mode
+
+        #nameValuePairs["otp_verified_srf"] = "V"
+        print(nameValuePairs)
+        print ("\nchecking if the srf id result was already declared\n")
+       #{{{ Check if result already declared
+        if(check_parameter == "1"):
+            try:
+                checkString = getPatientDataSrf(session,nameValuePairs["srf_id"])
+                print("Checkstring is " + checkString)
+                #if (checkString != '<tr><td colspan="5" class="text-center">***No matching record found***</td></tr>'):
+                if (checkString != 'No matching record found'):
+                    #<tr><td colspan="5" class="text-center">***No matching record found***</td> </tr>
+                    return ["RAD","Result Already Declared"]
+            except:
+                pass
+        elif(check_parameter == "2"):
+            try:
+                checkString = getPatientDataPatientId(session,nameValuePairs["patient_id"])
+                print("Checkstring is " + checkString)
+                #if (checkString != '<tr><td colspan="5" class="text-center">***No matching record found***</td></tr>'):
+                if (checkString != 'No matching record found'):
+                    return ["RAD","Result Already Declared"]
+            except:
+                pass
+       #}}}
+
+    elif (mode == "2" or mode == 'A'):
+        print("I am inside mode elif")
+        #nameValuePairs["page"] = 'edit'
+#{{{ Commented if conditionals that assign values based on test result to different gene ct values
+        """
+        if (dataFromSheet[1] == "Positive"): # for Positive patients
+            if (nameValuePairs["testing_kit_used"] == "Labgun" or nameValuePairs["testing_kit_used"] == "SD_Biosensor" or nameValuePairs["testing_kit_used"] == "Biomerieux_ARGENE" or nameValuePairs["testing_kit_used"] == "LabGun-tm_ExoFast"):
+
+                nameValuePairs["ct_value_screening"] = dataFromSheet[5]
+                nameValuePairs["covid19_result_egene"] = "Positive"
+                nameValuePairs["ct_value_rdrp"] = dataFromSheet[6]
+                nameValuePairs["rdrp_confirmatory"] = "Positive"
+
+            elif(nameValuePairs["testing_kit_used"] == "Fastract_SARS_kit"):
+
+                nameValuePairs["orf1b_confirmatory"] = "Positive"
+                nameValuePairs["ct_value_orf1b"] = dataFromSheet[8]
+
+        elif (dataFromSheet[1] == "Negative"): # for negative patients
+
+            if (nameValuePairs["testing_kit_used"] == "Labgun" or nameValuePairs["testing_kit_used"] == "SD_Biosensor" or nameValuePairs["testing_kit_used"] == "Biomerieux_ARGENE" or nameValuePairs["testing_kit_used"] == "LabGun-tm_ExoFast"):
+
+                nameValuePairs["covid19_result_egene"] = dataFromSheet[1] 
+
+            elif(nameValuePairs["testing_kit_used"] == "Fastract_SARS_kit"):
+
+                nameValuePairs["orf1b_confirmatory"] = dataFromSheet[1] 
+        """
+#}}}
+        #nameValuePairs["final_result_of_sample"] = dataFromSheet[1] #This value should be taken from the excel sheet
+        #nameValuePairs["sample_rdate"] = dataFromSheet[3] #This value should be taken from the excel sheet
+        #nameValuePairs["sample_tdate"] = dataFromSheet[4] #This value should be taken from the excel sheet
+        
+        #patient_id = dataFromSheet[0]#patient_id will be gotten from excel sheet
+
+        #record_id = getPatientData(session,patient_id,state,dist)[0]
+        print(" I am before record_id fetch")
+        record_id = getPatientData(session,nameValuePairs["patient_id"])[0]
+        print("record_id")
+        print(record_id)
+        clinical_data_id = getClinicalDataId(session,[record_id,nameValuePairs["patient_id"]])
+        print(clinical_data_id)
+        print("Reached here")
+
+        #nameValuePairs['patient_id'] = patient_id 
+        #nameValuePairs["sample_id"] = nameValuePairs["patient_id"]
+        nameValuePairs['record_id'] = record_id
+        nameValuePairs['clinical_data_id'] = clinical_data_id
+        #nameValuePairs["otp_verified_srf"] = "V"
+        print(nameValuePairs)
+
+        #remoteDbUrl = "http://cv19.stylesen.org/acceptFromPython.php"
+        #dbPayload = {'patient_name':nameValuePairs['patient_name'],'age':nameValuePairs['age'],'age_in':nameValuePairs['age_in'],'gender':nameValuePairs['gender'],'contact_number':nameValuePairs['contact_number'],'srf_id':nameValuePairs['srf_id'],'sample_cdate':nameValuePairs['sample_cdate'],'sample_rdate':nameValuePairs['sample_rdate'],'sample_type':nameValuePairs['sample_type'],'sample_tdate':nameValuePairs['sample_tdate'],'final_result_of_sample':nameValuePairs['final_result_of_sample']}
+        dbPayload = nameValuePairs;
+        print("dbPayload")
+        print(dbPayload)
+
+        #creating the hash for dbPayload
+        stringForHashing = ''
+        for key in dbPayload:
+            stringForHashing = stringForHashing + str((dbPayload[key]))
+        hashString = hashlib.sha256(stringForHashing.encode()).hexdigest()
+            
+        dbPayload['hash'] = hashString 
+        #dbPayload['district'] = dist
+
+        #current date
+        dateString = datetime.datetime.now().strftime('%Y-%m-%d')
+        dbPayload["entryDate"] = dateString
+#{{{ Commented code to send data to stylesen server
+
+        """        
+        As it is difficult to ensure database updates to 3 servers, dropping the update to cv19.stylesen.org
+        remoteDbPost = requests.post(remoteDbUrl,data=dbPayload,verify=False)
+        print("STATUS OF remote db posting")
+        remoteDbPostText = remoteDbPost.text # this variable used to see what the remote script says, it should actually say if there are zero or more entries for this srf_id
+        print(remoteDbPostText)
+        if(remoteDbPostText == ' 1'):
+            return ["RAD","Result Already Declared"]
+        elif(remoteDbPostText != ' Inserted RowsInserted Rows' and remoteDbPostText != ' 1'): #if the server has not responsed with either inserted rows or there are rows
+            noOfTries_stylesen = 2
+            while((remoteDbPostText != ' Inserted RowsInserted Rows' and remoteDbPostText != ' 1') and noOfTries_stylesen<5):
+                remoteDbPost = requests.post(remoteDbUrl,data=dbPayload,verify=False)
+                print(f"Trying stylesen {noOfTries_stylesen} time")
+                remoteDbPostText = remoteDbPost.text # this variable used to see what the remote script says, it should actually say if there are zero or more entries for this srf_id
+                print(remoteDbPostText)
+                noOfTries_stylesen = noOfTries_stylesen + 1
+            #once out of the loop if the remoteDbPostText say it has the record already then return
+            if(remoteDbPostText == ' 1'):
+                return ["RAD","Result Already Declared"]
+
+        """
+#}}}
+        print("\n")
+
+        #Send data to the Indian Server
+        if (mode != 'A'): # if the user has NOT chosen to run in A mode then the following block runs
+            try:
+                remoteDbUrl2 = '*******************REDACTED********************'
+                remoteDbPost2 = requests.post(remoteDbUrl2,data=dbPayload,verify=False)
+                print("STATUS OF Indian Server posting")
+                remoteDbPost2Text = remoteDbPost2.text # this variable is used to see what the second database script says
+                print(remoteDbPost2Text)
+                if(remoteDbPost2Text == ' 1'):
+                    return ["RAD","Result Already Declared"]
+                print("\n")
+            except:
+                return ["RDU","Unable To Reach Remote Database"]
+            
+
+
+    print("after dbPayload")
+    print(nameValuePairs)
+
+    #post3 = session.post(url3,data=nameValuePairs,verify=False) 
+    #print(post3.text)
+
+    try:
+        print(" I am inside data posting to icmr try")
+        post3 = session.post(url3,data=nameValuePairs,verify=False) 
+        print(post3.text)
+    except: #if the server does respond the first time wait for a second and then try
+        print(" I am inside data posting to icmr exception")
+        time.sleep(1)
+        post3 = session.post(url3,data=nameValuePairs,verify=False) 
+        print(post3.text)
+
+        #Record successfully submitted--Under Process##
+        #Depending on the kit used the the above statment changes to Record successfully submitted--Under Process#Under Process# or
+        #Record successfully submitted--Under Process#Under Process#Under Process#
+        #Record of this Patient ID already exist in database, Please check List of records for this Patient ID.
+
+    if(mode == '1' and ((post3.text.split("--")[0]) != 'Record successfully submitted') ):
+        return ["AF","Id already present"]
+        
+#{{{ Sms sending 
+    print("I am before sms")
+    print("sms")
+    print(sms)
+
+    if (sms == '1'):# if the user has chosen to run the program with send sms mode
+        print("I am inside send sms")
+        if(smsServer == '1'):#if the user has chosen to send sms via BSNL
+            print("I am using BSNL")
+
+            sendSmsBsnl(nameValuePairs["contact_number"],nameValuePairs['srf_id'],nameValuePairs['patient_name'],nameValuePairs['age'],nameValuePairs['gender'],nameValuePairs["final_result_of_sample"],program_mode)
+
+
+        elif(smsServer == '2'):#if the user has chosen to send sms via ICMR
+            #send sms
+            print("I am using ICMR")
+            try:
+                nameValuePairs['age']
+                sendSms(nameValuePairs["contact_number"],nameValuePairs['srf_id'],nameValuePairs['patient_name'],nameValuePairs['age'],nameValuePairs['gender'],nameValuePairs["final_result_of_sample"],program_mode)
+            except KeyError:
+                print("Age Not Known")
+                sendSms(nameValuePairs["contact_number"],nameValuePairs['srf_id'],nameValuePairs['patient_name'],'',nameValuePairs['gender'],nameValuePairs["final_result_of_sample"],program_mode)
+
+
+        elif(smsServer == '3'):#if the user has chosen to send sms via MYGOVT
+            print("I am using MYGOVT server")
+            try:
+                sendSmsMyGovt(nameValuePairs["contact_number"],nameValuePairs['srf_id'],nameValuePairs['patient_name'],nameValuePairs['age'],nameValuePairs['gender'],nameValuePairs["final_result_of_sample"],program_mode)
+            except KeyError:
+                print ("Age Not Known")
+                sendSmsMyGovt(nameValuePairs["contact_number"],nameValuePairs['srf_id'],nameValuePairs['patient_name'],'',nameValuePairs['gender'],nameValuePairs["final_result_of_sample"],program_mode)
+                 
+
+
+
+        elif(smsServer == '4'):#if the user has chosen to send sms via MYGOVT
+            print("I am using ABM server")
+            try:
+                print (nameValuePairs['age'])
+                sendSmsAbm(nameValuePairs["contact_number"],nameValuePairs['srf_id'],nameValuePairs['patient_name'],nameValuePairs['age'],nameValuePairs['gender'],nameValuePairs["final_result_of_sample"],program_mode)
+            except KeyError:
+                print ("Age Not Known")
+                sendSmsAbm(nameValuePairs["contact_number"],nameValuePairs['srf_id'],nameValuePairs['patient_name'],'',nameValuePairs['gender'],nameValuePairs["final_result_of_sample"],program_mode)
+            
+            #sendSmsAbm(9443015064,nameValuePairs['srf_id'],nameValuePairs['patient_name'],nameValuePairs['age'],nameValuePairs['gender'],nameValuePairs["final_result_of_sample"],program_mode)
+    #}}}
+    return ["Success","Record Added"]
+
+    #}}}
+
+#{{{ sendSms(phoneNumber,srf_id,patient_name,age,gender,result,program_mode) returns nothing
+def sendSms(phoneNumber,srf_id,patient_name,age,gender,result,program_mode):
+    print("Entered Function")
+    url = '***Redacted****' 
+
+    payload = {'c':'','c':'','':''} # redacted
+    payload['mobile'] = str(phoneNumber)
+
+    data = {} # to be packed as json object
+    # the following string will be send to the patient
+
+    req_string =    (str("SRF ID: ") + str(srf_id) + "\n" + 
+                    str(patient_name) + " " + str(age) + " " + str(gender) + "\n") 
+
+    if (program_mode == '1'):
+        req_string =    (req_string + "\n" + 
+                        str("Result:\t") + str(result).upper() + "\n" + 
+                       "YOUR FINAL RESULT WILL BE UPDATED SOON") 
+    elif (program_mode == '2' or program_mode == 'A'):
+        req_string =    (req_string + "\n" +
+                        str("RESULT:\t 2019-nCoV-") + str(result).upper() + "\n") 
+        #for adding the url for patients to download report
+        #req_string =    (req_string + str("Download your test report at http://cv19.stylesen.org/"))
+        req_string =    (req_string + str("Download report at https://cv19.microkapv.in/"))
+
+        print (req_string)
+
+        data["<message>"] = req_string
+        json_data = json.dumps(data)
+
+        payload["params"] = json_data
+
+        post = requests.post(url,data=payload,verify=False)
+        print("SMS Status\n")
+        print(post.text)
+
+    return
+
+
+    #}}}
+
+#{{{ sendSmsAbm(phoneNumber,srf_id,patient_name,age,gender,result,program_mode) returns nothing
+def sendSmsAbm(phoneNumber,srf_id,patient_name,age,gender,result,program_mode):
+    print("Entered Function sendSmsAbm")
+    url = 'http://abm.gtechsms.in/api/sendhttp.php' 
+
+    payload = {'a':'***','s':'***','r':'**','c':'**'} # payload redacted
+    payload['mobiles'] = str(phoneNumber)
+
+    # the following string will be send to the patient
+    req_string =    (str("SRF ID:\t") + str(srf_id) + "\n" + 
+                    str(patient_name) + " " + str(age) + " " + str(gender)+"\n")  
+
+    if (program_mode == '1'):
+        req_string =    (req_string + "\n" + 
+                        str("Result:\t") + str(result).upper() + "\n" + 
+                       "YOUR FINAL RESULT WILL BE UPDATED SOON") 
+    elif (program_mode == '2' or program_mode == 'A'):
+        req_string =    (req_string + "\n" +
+                        str("RESULT 2019-nCoV-:\t") + str(result).upper() + "\n") 
+        #for adding the url for patients to download report
+        req_string =    (req_string + str("Download report https://cv19.microkapv.in/"))
+
+        print (req_string)
+
+        payload["message"] = req_string
+        #json_data = json.dumps(data)
+
+        #payload["params"] = json_data
+
+        post = requests.post(url,data=payload,verify=False)
+        print("SMS Status\n")
+        print(post.text)
+
+    return
+
+
+    #}}}
+
+#{{{ findRequiredLine(page) page is a long multiline string
+def findRequiredLine(page):
+    req_lines = []
+    pattern1 = re.compile(r"^\s*([\$][\(][\'][\#]srf_id\'\))",re.MULTILINE)
+    pattern2 = re.compile(r"^\s*([\$][\(][\'][\#]district\'\)\.val\(\'[0-9]+\'\))",re.MULTILINE)
+    pattern3 = re.compile(r"^\s*([\$][\(][\'][\#]village_town\'\))",re.MULTILINE)
+#{{{for loop
+    for i in page.splitlines():
+        if pattern1.search(i) != None:
+            re.split(r"^\s*",i)
+            req_lines.append(re.split(r"^\s*",i)[1])
+            #print(i)
+        elif pattern2.search(i) != None:
+            re.split(r"^\s*",i)
+            req_lines.append(re.split(r"^\s*",i)[1])
+            #print(i)
+        elif pattern3.search(i) != None:
+            re.split(r"^\s*",i)
+            req_lines.append(re.split(r"^\s*",i)[1])
+            #print(i)
+    #}}}
+
+        
+    return req_lines
+    #}}}
+
+#{{{findRequiredLine2(page) page is a long multiline string
+def findRequiredLine2(page):
+    req_lines = []
+    pattern1 = re.compile(r'^\s*([<]a href="edit_record.php")',re.MULTILINE)
+
+    for i in page.splitlines():
+        if pattern1.search(i) != None:
+            req_lines.append(re.split(r"^\s*",i)[1])
+            break
+
+
+    return req_lines
+    #}}}
+
+#{{{ getPatientDataSrf(session,srf_id) returns the string returned by the post method
+def getPatientDataSrf(session,srf_id):
+    print("I am inside getPatientDataSrf")
+    url = "*******************REDACTED********************"
+    payload = {"srf_id":srf_id,"page":"search_record","records":"own"}
+    post = session.post(url,data=payload,verify=False)
+    webpage = post.text
+    try:
+        webpageStr = webpage.split("***")[1] #to match No matching records found
+    except IndexError:
+        webpageStr = "Atleast 1 matching record found"
+
+    print(webpageStr)
+    return webpageStr
+    
+    #}}}
+
+#{{{ getPatientDataPatientId(session,patient_id) returns the string returned by the post method
+def getPatientDataPatientId(session,patient_id):
+    url = "*******************REDACTED********************"
+    payload = {"patient_id":patient_id,"page":"search_record","records":"own"}
+    post = session.post(url,data=payload,verify=False)
+    webpage = post.text
+    try:
+        webpageStr = webpage.split("***")[1] #to match No matching records found
+    except IndexError:
+        webpageStr = "Atleast 1 matching record found"
+    print(webpageStr)
+    return webpageStr
+    
+    #}}}
+
+#{{{ getPatientData(session,patient_id) returns [record_id,patient_id]
+#10-07-2020 state and district parameters are going to be deleted
+
+def getPatientData(session,patient_id): #this function gets the session data and patient_id to find the record_id
+    print(" I am inside get patient data")
+    url = "*******************REDACTED********************"
+    #payload = {"patient_id":patient_id,"state":"TAMIL NADU","page":"search_record","records":"own"}
+
+    #payload = {"patient_id":patient_id,"state":state,"district":district,"page":"search_record","records":"own"}
+    payload = {"patient_id":patient_id,"page":"search_record","records":"own"}
+    post = session.post(url,data=payload,verify=False)
+
+    webpage = post.text
+    #print(webpage)
+    print(patient_id)
+
+    #print(webpage)
+
+    req_lines = findRequiredLine2(webpage)
+    print("I am inside getPatientData")
+    print(req_lines)
+    processed_line = req_lines[0].split("><")[0].replace("<a href=","").split(" ")
+    record_id = re.split(r'"',processed_line[-2].split("=")[1])[1] 
+    patient_id = re.split(r'"',processed_line[-1].split("=")[1])[1]
+
+    #print(record_id)
+    #print(patient_id)
+
+    return[record_id,patient_id]
+    
+#<a href="edit_record.php" title="Edit" class="edit_record" key1="8450399" key2="4000001"><span class="btn btn-success">Edit</span></a>
+
+    
+    #}}}
+
+#{{{ findRequiredLine3(page) page is a long multiline string
+def findRequiredLine3(page):
+    req_lines = []
+    pattern1 = re.compile(r'^\s*([<]input type[=]"hidden" name[=]"clinical_data_id")',re.MULTILINE)
+
+    for i in page.splitlines():
+        if pattern1.search(i) != None:
+            req_lines.append(re.split(r"^\s*",i)[1])
+            break
+    return req_lines
+#<input type="hidden" name="clinical_data_id" value="8016272">
+
+   #}}}
+
+#{{{ getClinicalDataId(session,ids) returns clinical_data_id
+def getClinicalDataId(session,ids):
+    url = "*******************REDACTED********************"
+    payload = {"record_id" : ids[0], "patient_id" : ids[1]}
+
+    post = session.post(url,data=payload,verify=False)
+
+    webpage = post.text
+    req_lines = findRequiredLine3(webpage)
+    clinical_data_id = re.split(r'"',req_lines[0].split(" ")[-1].replace(">","").split("=")[1])[1]
+    #print (clinical_data_id)
+    return str(clinical_data_id)
+
+    #}}}
+
+#{{{checkForDuplicates(fileNameString)  returns fileCheckDict = {"incompleteRecords":1 or 0, "doubleEntry":1 or 0,"duplicatesDifferentSrf":1 or 0}. If incomplete records or two srf ids have same sample number then the program quits else it continues
+def checkForDuplicates(fileNameString):
+    print("Please wait, Presence of duplicates are being checked")
+    data = {}
+    incompleteRecords = []
+    doubleEntry = [] # duplicates such that the entire entry is repeated (not much harm)
+    duplicatesDifferentSrf = [] # duplicates where the same patient_id is assigned to 2 different srf ids (potentially harmful)
+    
+    #underProcessCompleteness = [1,1,1,1,0,0,0]
+    #negativeCompleteness = [1,1,1,1,1,0,0]
+    #positiveCompleteness = [1,1,1,1,1,1,1]
+
+    # to check completeness with the new file where kit and another ct value(if required) will be specified
+    underProcessCompleteness = [1,1,1,1,0,0,0,0,0]
+    negativeCompleteness = [1,1,1,1,1,0,0,1,0]
+    positiveCompletenessLabgun = [1,1,1,1,1,1,1,1,0]
+    positiveCompletenessFastract = [1,1,1,1,1,0,0,1,1] 
+
+    with open(fileNameString) as csv_file:
+        csv_reader = csv.reader(csv_file,delimiter=',')
+        i = 0
+        #{{{ Handling each row
+        for row in csv_reader:
+            lineData = []
+            if (i > 0):
+                completeness = [] #initialize the completeness list, this will hold what values are present
+                for words in row:
+                    lineData.append(words)
+                    pattern = re.compile(r"\s+")
+                    wordsWithoutWhiteSpace = re.sub(pattern,'',words)
+                    print(wordsWithoutWhiteSpace)
+                    if (wordsWithoutWhiteSpace != ''): # if it a non empty string then
+                        completeness.append(1)
+                    else:# else append zero to the compleness list
+                        completeness.append(0)
+                #print(lineData)
+                #if the row is Under Process it should contain 4 non empty strings
+                if(lineData[1] == 'Under Process'):
+                    if(completeness != underProcessCompleteness):
+                        incompleteRecords.append(i+1)
+                #if the row is negative it should contain 5 non empty strings
+                if(lineData[1] == 'Negative'):
+                    if(completeness != negativeCompleteness):
+                        incompleteRecords.append(i+1)
+                #elif the row is positive then the lineData should contain 7 non empty strings
+                elif (lineData[1] == 'Positive'):
+                    if(completeness != positiveCompletenessLabgun and completeness != positiveCompletenessFastract):
+                        incompleteRecords.append(i+1)
+                elif (lineData[1] != 'Under Process' and lineData[1] != 'Negative' and lineData != 'Positive'): 
+                    incompleteRecords.append(i+1)
+
+                print(completeness)
+                #print(lineData)
+                if (completeness == underProcessCompleteness or completeness == negativeCompleteness or completeness == positiveCompletenessLabgun or completeness == positiveCompletenessFastract):# the data should be complete
+                    try:#see if the patient_id already exists
+                        data[lineData[0]] 
+                        print(f"sample id is {lineData[0]}")
+                        print(f"srf id is {lineData[2]}")
+                        if (data[lineData[0]] == lineData[2]): #if same record repeating twice 
+                            doubleEntry.append(lineData[0])
+                        elif (data[lineData[0]] != lineData[2]): #if the already existing patient id matches to a different srf_id from the present
+                            duplicatesDifferentSrf.append(lineData[0])
+                    except KeyError: # if the patient_id does not exist then add it to the dictionary
+                        data[lineData[0]] = lineData[2]
+
+
+            i = i + 1
+            #}}}
+
+#{{{Summary printing
+    fileCheckDict = {} 
+
+    print("\nExistense of duplicate records were cheked: \n")
+    if (len(incompleteRecords) != 0): # if there are incomplete records
+        print("\n*********The following rows in the input file need to be checked for INCOMPLETENESS*********************\n")
+        print(incompleteRecords);
+        print("\n********************************************************************************************************\n\n")
+        fileCheckDict["incompleteRecords"] = 1 # 1 indicate there are incomplete records
+        #print("I am quiting")
+        #quit()
+    elif(len(incompleteRecords) == 0):
+        print("\n++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n")
+        print("There were no incomplete records")
+        print("\n++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n")
+        fileCheckDict["incompleteRecords"] = 0 # 0 indicate there are NO incomplete records
+
+
+    if(len(duplicatesDifferentSrf) != 0): # if 2 different srf ids match with sample id
+        print("\n*******The following sample ids match to 2 different srf ids CLARIFY WITH MICRO DEPT********************\n")
+        print(duplicatesDifferentSrf)
+        print("\n********************************************************************************************************\n\n")
+        fileCheckDict["duplicatesDifferentSrf"] = 1 # 1 indicates that one sample id matches with 2 srf numbers
+        #print("I am quitting")
+        #quit()
+    elif(len(duplicatesDifferentSrf) == 0):
+        print("\n********************************************************************************************************\n\n")
+        print("Every SRF ID has a unique sample ID")
+        print("\n********************************************************************************************************\n\n")
+        fileCheckDict["duplicatesDifferentSrf"] = 0 # 0 indicates that every srf id has a unique sample id
+
+    if(len(doubleEntry) != 0): # if entire rows are repeated
+        print("*****The following rows starting with sample ids listed below are repeated in total not harmful but still clarify******\n")
+        print(doubleEntry)
+        print("************************************************************************************************************************\n\n")
+        fileCheckDict["doubleEntry"] = 1 # 1 indicate that there are double entries
+    elif(len(doubleEntry) == 0):
+
+        print("************************************************************************************************************************\n\n")
+        print("There were NO DOUBLE RECORDS FOUND")
+        print("************************************************************************************************************************\n\n")
+        fileCheckDict["doubleEntry"] = 0 # 0 indicates that NO double entries
+    #}}}
+    print (fileCheckDict)
+
+    return fileCheckDict
+                
+#}}}
+
+#{{{getSrfIdSampleIdAndSampleRdate() returns a list like [[sample_id,srf_id],.....] data checking temporarily disabled
+def getSrfIdSampleIdAndSampleRdate():
+    print("Please Enter the csvfile which contains the sample id and srf_id")
+    fileName = str(input())
+    data = []
+
+    #{{{Commented Checking for file goodness
+    """
+    #check for goodness of the input file
+    fileGoodness = checkForDuplicates(fileName)
+
+    if(fileGoodness["incompleteRecords"] == 1 or fileGoodness["duplicatesDifferentSrf"] == 1):
+        print("It is suggested that to terminate the program")
+        print("I am quitting for now until a clarification is obtained")
+        quit()
+    elif(fileGoodness["incompleteRecords"] == 0 and fileGoodness["duplicatesDifferentSrf"] == 0 and fileGoodness["doubleEntry"] == 0):
+        print("Everything is fine I am proceding")
+
+    elif(fileGoodness["doubleEntry"] == 1):
+        print("There are harmless double entries")
+        print("Press 1 to continue or press someother key to terminate the program")
+        if(str(input()) != '1'):
+            quit()
+
+    """
+    #}}}
+
+    with open(fileName) as csv_file:
+        csv_reader = csv.reader(csv_file,delimiter=',')
+        i = 0
+
+        for row in csv_reader:
+            lineData = []
+            if (i > 0):
+                for words in row:
+                    lineData.append(words)
+                if (lineData[0] != ''):
+                    data.append(lineData)
+
+            i = i + 1
+
+    
+    print (data)
+    print (len(data))
+    return(data)
+    #}}}
+
+#{{{findDistrict(distCode) returns the distict as string
+def findDistrict(distCode):
+   #{{{ dist dict 
+    distDictionary = {'303': '24 PARAGANAS NORTH', '304': '24 PARAGANAS SOUTH', '501': 'ADILABAD', '667': 'AGAR MALWA', '118': 'AGRA', '438': 'AHMADABAD', '466': 'AHMEDNAGAR', '261': 'AIZAWL', '86': 'AJMER', '467': 'AKOLA', '554': 'ALAPPUZHA', '119': 'ALIGARH', '664': 'ALIPURDUAR', '639': 'ALIRAJPUR', '45': 'ALMORA', '87': 'ALWAR', '58': 'AMBALA', '121': 'AMBEDKAR NAGAR', '640': 'AMETHI', '468': 'AMRAVATI', '439': 'AMRELI', '27': 'AMRITSAR', '154': 'AMROHA', '440': 'ANAND', '502': 'ANANTAPUR', '1': 'ANANTNAG', '628': 'ANJAW', '344': 'ANUGUL', '390': 'ANUPPUR', '188': 'ARARIA', '610': 'ARIYALUR', '672': 'ARVALLI', '611': 'ARWAL', '391': 'ASHOKNAGAR', '122': 'AURAIYA', '189': 'AURANGABAD', '469': 'AURANGABAD', '140': 'AYODHYA', '123': 'AZAMGARH', '524': 'BAGALKOTE', '46': 'BAGESHWAR', '124': 'BAGHPAT', '125': 'BAHRAICH', '616': 'BAKSA', '392': 'BALAGHAT', '345': 'BALANGIR', '346': 'BALESHWAR', '528': 'BALLARI', '126': 'BALLIA', '646': 'BALOD', '644': 'BALODA BAZAR', '127': 'BALRAMPUR', '649': 'BALRAMPUR', '441': 'BANAS KANTHA', '128': 'BANDA', '623': 'BANDIPORA', '190': 'BANKA', '305': 'BANKURA', '88': 'BANSWARA', '129': 'BARABANKI', '3': 'BARAMULLA', '89': 'BARAN', '130': 'BAREILLY', '347': 'BARGARH', '90': 'BARMER', '605': 'BARNALA', '280': 'BARPETA', '393': 'BARWANI', '374': 'BASTAR', '131': 'BASTI', '28': 'BATHINDA', '470': 'BEED', '191': 'BEGUSARAI', '527': 'BELAGAVI', '650': 'BEMETARA', '526': 'BENGALURU RURAL', '525': 'BENGALURU URBAN', '394': 'BETUL', '179': 'BHADOHI', '690': 'BHADRADRI KOTHAGUDEM', '348': 'BHADRAK', '192': 'BHAGALPUR', '471': 'BHANDARA', '91': 'BHARATPUR', '442': 'BHARUCH', '443': 'BHAVNAGAR', '92': 'BHILWARA', '395': 'BHIND', '59': 'BHIWANI', '193': 'BHOJPUR', '396': 'BHOPAL', '529': 'BIDAR', '636': 'BIJAPUR', '132': 'BIJNOR', '93': 'BIKANER', '15': 'BILASPUR', '375': 'BILASPUR', '307': 'BIRBHUM', '252': 'BISHNUPUR', '705': 'BISWANATH', '322': 'BOKARO', '281': 'BONGAIGAON', '676': 'BOTAD', '349': 'BOUDH', '133': 'BUDAUN', '2': 'BUDGAM', '134': 'BULANDSHAHR', '472': 'BULDHANA', '94': 'BUNDI', '397': 'BURHANPUR', '194': 'BUXAR', '282': 'CACHAR', '77': 'CENTRAL', '531': 'CHAMARAJANAGARA', '16': 'CHAMBA', '47': 'CHAMOLI', '48': 'CHAMPAWAT', '262': 'CHAMPHAI', '135': 'CHANDAULI', '253': 'CHANDEL', '44': 'CHANDIGARH', '473': 'CHANDRAPUR', '229': 'CHANGLANG', '708': 'CHARAIDEO', '701': 'CHARKI DADRI', '323': 'CHATRA', '730': 'CHENGALPATTU', '568': 'CHENNAI', '398': 'CHHATARPUR', '399': 'CHHINDWARA', '668': 'CHHOTAUDEPUR', '630': 'CHIKKABALLAPURA', '532': 'CHIKKAMAGALURU', '612': 'CHIRANG', '533': 'CHITRADURGA', '136': 'CHITRAKOOT', '503': 'CHITTOOR', '95': 'CHITTORGARH', '254': 'CHURACHANDPUR', '96': 'CHURU', '569': 'COIMBATORE', '308': 'COOCHBEHAR', '570': 'CUDDALORE', '350': 'CUTTACK', '465': 'DADRA AND NAGAR HAVELI', '534': 'DAKSHINA KANNADA', '463': 'DAMAN', '400': 'DAMOH', '444': 'DANG', '376': 'DANTEWADA', '195': 'DARBHANGA', '309': 'DARJEELING', '283': 'DARRANG', '401': 'DATIA', '97': 'DAUSA', '535': 'DAVANGERE', '49': 'DEHRADUN', '351': 'DEOGARH', '324': 'DEOGHAR', '137': 'DEORIA', '674': 'DEVBHUMI DWARKA', '402': 'DEWAS', '269': 'DHALAI', '377': 'DHAMTARI', '325': 'DHANBAD', '403': 'DHAR', '571': 'DHARMAPURI', '536': 'DHARWAD', '284': 'DHEMAJI', '352': 'DHENKANAL', '98': 'DHOLPUR', '285': 'DHUBRI', '474': 'DHULE', '230': 'DIBANG VALLEY', '286': 'DIBRUGARH', '299': 'DIMA HASAO', '244': 'DIMAPUR', '310': 'DINAJPUR DAKSHIN', '311': 'DINAJPUR UTTAR', '572': 'DINDIGUL', '404': 'DINDORI', '464': 'DIU', '4': 'DODA', '445': 'DOHAD', '326': 'DUMKA', '99': 'DUNGARPUR', '378': 'DURG', '78': 'EAST', '225': 'EAST DISTRICT', '273': 'EAST GARO HILLS', '505': 'EAST GODAVARI', '657': 'EAST JAINTIA HILLS', '231': 'EAST KAMENG', '274': 'EAST KHASI HILLS', '405': 'EAST NIMAR', '232': 'EAST SIANG', '327': 'EAST SINGHBUM', '555': 'ERNAKULAM', '573': 'ERODE', '138': 'ETAH', '139': 'ETAWAH', '60': 'FARIDABAD', '29': 'FARIDKOT', '141': 'FARRUKHABAD', '61': 'FATEHABAD', '30': 'FATEHGARH SAHIB', '142': 'FATEHPUR', '651': 'FAZILKA', '143': 'FIROZABAD', '31': 'FIROZEPUR', '537': 'GADAG', '475': 'GADCHIROLI', '353': 'GAJAPATI', '626': 'GANDERBAL', '446': 'GANDHINAGAR', '100': 'GANGANAGAR', '354': 'GANJAM', '328': 'GARHWA', '645': 'GARIYABAND', '144': 'GAUTAM BUDDHA NAGAR', '196': 'GAYA', '145': 'GHAZIABAD', '146': 'GHAZIPUR', '675': 'GIR SOMNATH', '329': 'GIRIDIH', '287': 'GOALPARA', '330': 'GODDA', '288': 'GOLAGHAT', '654': 'GOMATI', '147': 'GONDA', '476': 'GONDIA', '197': 'GOPALGANJ', '148': 'GORAKHPUR', '331': 'GUMLA', '406': 'GUNA', '506': 'GUNTUR', '32': 'GURDASPUR', '62': 'GURUGRAM', '407': 'GWALIOR', '289': 'HAILAKANDI', '17': 'HAMIRPUR', '149': 'HAMIRPUR', '101': 'HANUMANGARH', '661': 'HAPUR', '408': 'HARDA', '150': 'HARDOI', '50': 'HARIDWAR', '539': 'HASSAN', '163': 'HATHRAS', '540': 'HAVERI', '332': 'HAZARIBAGH', '477': 'HINGOLI', '63': 'HISAR', '726': 'HNAHTHIAL', '709': 'HOJAI', '312': 'HOOGHLY', '409': 'HOSHANGABAD', '33': 'HOSHIARPUR', '313': 'HOWRAH', '507': 'HYDERABAD', '556': 'IDUKKI', '255': 'IMPHAL EAST', '256': 'IMPHAL WEST', '999': 'INDIA', '410': 'INDORE', '411': 'JABALPUR', '355': 'JAGATSINGHAPUR', '681': 'JAGITIAL', '102': 'JAIPUR', '103': 'JAISALMER', '356': 'JAJAPUR', '34': 'JALANDHAR', '151': 'JALAUN', '478': 'JALGAON', '479': 'JALNA', '104': 'JALORE', '314': 'JALPAIGURI', '5': 'JAMMU', '447': 'JAMNAGAR', '333': 'JAMTARA', '198': 'JAMUI', '689': 'JANGOAN', '379': 'JANJGIR-CHAMPA', '380': 'JASHPUR', '152': 'JAUNPUR', '687': 'JAYASHANKAR BHUPALAPALLY', '199': 'JEHANABAD', '412': 'JHABUA', '64': 'JHAJJAR', '105': 'JHALAWAR', '153': 'JHANSI', '703': 'JHARGRAM', '357': 'JHARSUGUDA', '106': 'JHUNJHUNU', '65': 'JIND', '713': 'JIRIBAM', '107': 'JODHPUR', '695': 'JOGULAMBA GADWAL', '290': 'JORHAT', '448': 'JUNAGADH', '382': 'KABIRDHAM', '449': 'KACHCHH', '200': 'KAIMUR (BHABUA)', '66': 'KAITHAL', '711': 'KAKCHING', '538': 'KALABURAGI', '358': 'KALAHANDI', '702': 'KALIMPONG', '729': 'KALLAKURICHI', '685': 'KAMAREDDY', '717': 'KAMJONG', '718': 'KAMLE', '291': 'KAMRUP', '618': 'KAMRUP METRO', '574': 'KANCHIPURAM', '359': 'KANDHAMAL', '712': 'KANGPOKPI', '18': 'KANGRA', '381': 'KANKER', '155': 'KANNAUJ', '575': 'KANNIYAKUMARI', '557': 'KANNUR', '156': 'KANPUR DEHAT', '157': 'KANPUR NAGAR', '35': 'KAPURTHALA', '598': 'KARAIKAL', '108': 'KARAULI', '292': 'KARBI ANGLONG', '6': 'KARGIL', '293': 'KARIMGANJ', '508': 'KARIMNAGAR', '67': 'KARNAL', '576': 'KARUR', '558': 'KASARAGOD', '633': 'KASGANJ', '7': 'KATHUA', '201': 'KATIHAR', '413': 'KATNI', '158': 'KAUSHAMBI', '360': 'KENDRAPARA', '361': 'KENDUJHAR', '202': 'KHAGARIA', '509': 'KHAMMAM', '414': 'KHARGONE', '728': 'KHAWZAWL', '450': 'KHEDA', '159': 'KHERI', '362': 'KHORDHA', '652': 'KHOWAI', '606': 'KHUNTI', '19': 'KINNAUR', '614': 'KIPHIRE', '203': 'KISHANGANJ', '620': 'KISHTWAR', '541': 'KODAGU', '334': 'KODERMA', '245': 'KOHIMA', '294': 'KOKRAJHAR', '542': 'KOLAR', '263': 'KOLASIB', '480': 'KOLHAPUR', '315': 'KOLKATA', '559': 'KOLLAM', '643': 'KONDAGAON', '543': 'KOPPAL', '363': 'KORAPUT', '383': 'KORBA', '384': 'KOREA', '109': 'KOTA', '560': 'KOTTAYAM', '561': 'KOZHIKODE', '677': 'KRA  DAADI', '510': 'KRISHNA', '577': 'KRISHNAGIRI', '622': 'KULGAM', '20': 'KULLU', '699': 'KUMURAM BHEEM ASIFABAD', '8': 'KUPWARA', '511': 'KURNOOL', '68': 'KURUKSHETRA', '233': 'KURUNG KUMEY', '160': 'KUSHI NAGAR', '21': 'LAHUL AND SPITI', '295': 'LAKHIMPUR', '204': 'LAKHISARAI', '553': 'LAKSHADWEEP DISTRICT', '161': 'LALITPUR', '335': 'LATEHAR', '481': 'LATUR', '264': 'LAWNGTLAI', '9': 'LEH LADAKH', '724': 'LEPARADA', '336': 'LOHARDAGA', '234': 'LOHIT', '666': 'LONGDING', '615': 'LONGLENG', '235': 'LOWER DIBANG VALLEY', '719': 'LOWER SIANG', '236': 'LOWER SUBANSIRI', '162': 'LUCKNOW', '36': 'LUDHIANA', '265': 'LUNGLEI', '205': 'MADHEPURA', '206': 'MADHUBANI', '578': 'MADURAI', '688': 'MAHABUBABAD', '512': 'MAHABUBNAGAR', '164': 'MAHARAJGANJ', '385': 'MAHASAMUND', '599': 'MAHE', '69': 'MAHENDRAGARH', '451': 'MAHESANA', '669': 'MAHISAGAR', '165': 'MAHOBA', '166': 'MAINPURI', '706': 'MAJULI', '562': 'MALAPPURAM', '316': 'MALDAH', '364': 'MALKANGIRI', '266': 'MAMIT', '684': 'MANCHERIAL', '22': 'MANDI', '415': 'MANDLA', '416': 'MANDSAUR', '544': 'MANDYA', '37': 'MANSA', '296': 'MARIGAON', '167': 'MATHURA', '168': 'MAU', '365': 'MAYURBHANJ', '513': 'MEDAK', '700': 'MEDCHAL MALKAJGIRI', '317': 'MEDINIPUR EAST', '318': 'MEDINIPUR WEST', '169': 'MEERUT', '170': 'MIRZAPUR', '38': 'MOGA', '246': 'MOKOKCHUNG', '247': 'MON', '171': 'MORADABAD', '673': 'MORBI', '417': 'MORENA', '720': 'MULUGU', '482': 'MUMBAI', '483': 'MUMBAI SUBURBAN', '647': 'MUNGELI', '207': 'MUNGER', '319': 'MURSHIDABAD', '172': 'MUZAFFARNAGAR', '208': 'MUZAFFARPUR', '545': 'MYSURU', '366': 'NABARANGPUR', '320': 'NADIA', '297': 'NAGAON', '579': 'NAGAPATTINAM', '694': 'NAGARKURNOOL', '110': 'NAGAUR', '484': 'NAGPUR', '51': 'NAINITAL', '209': 'NALANDA', '298': 'NALBARI', '514': 'NALGONDA', '580': 'NAMAKKAL', '678': 'NAMSAI', '485': 'NANDED', '486': 'NANDURBAR', '721': 'NARAYANPET', '637': 'NARAYANPUR', '452': 'NARMADA', '418': 'NARSINGHPUR', '487': 'NASHIK', '453': 'NAVSARI', '210': 'NAWADA', '367': 'NAYAGARH', '419': 'NEEMUCH', '79': 'NEW DELHI', '603': 'NICOBARS', '680': 'NIRMAL', '722': 'NIWARI', '516': 'NIZAMABAD', '714': 'NONEY', '80': 'NORTH', '632': 'NORTH AND MIDDLE ANDAMAN', '226': 'NORTH DISTRICT', '81': 'NORTH EAST', '656': 'NORTH GARO HILLS', '551': 'NORTH GOA', '270': 'NORTH TRIPURA', '82': 'NORTH WEST', '368': 'NUAPADA', '604': 'NUH', '488': 'OSMANABAD', '723': 'PAKKE KESSANG', '337': 'PAKUR', '563': 'PALAKKAD', '338': 'PALAMU', '665': 'PALGHAR', '111': 'PALI', '619': 'PALWAL', '454': 'PANCH MAHALS', '70': 'PANCHKULA', '71': 'PANIPAT', '420': 'PANNA', '237': 'PAPUM PARE', '489': 'PARBHANI', '704': 'PASCHIM BARDHAMAN', '211': 'PASHCHIM CHAMPARAN', '455': 'PATAN', '564': 'PATHANAMTHITTA', '662': 'PATHANKOT', '41': 'PATIALA', '212': 'PATNA', '52': 'PAURI GARHWAL', '682': 'PEDDAPALLI', '581': 'PERAMBALUR', '613': 'PEREN', '248': 'PHEK', '715': 'PHERZAWL', '173': 'PILIBHIT', '53': 'PITHORAGARH', '600': 'PONDICHERRY', '10': 'POONCH', '456': 'PORBANDAR', '517': 'PRAKASAM', '174': 'PRATAPGARH', '629': 'PRATAPGARH', '120': 'PRAYAGRAJ', '582': 'PUDUKKOTTAI', '11': 'PULWAMA', '490': 'PUNE', '306': 'PURBA BARDHAMAN', '213': 'PURBI CHAMPARAN', '369': 'PURI', '214': 'PURNIA', '321': 'PURULIA', '175': 'RAE BARELI', '546': 'RAICHUR', '491': 'RAIGAD', '386': 'RAIGARH', '387': 'RAIPUR', '421': 'RAISEN', '683': 'RAJANNA SIRCILLA', '422': 'RAJGARH', '457': 'RAJKOT', '388': 'RAJNANDGAON', '12': 'RAJOURI', '112': 'RAJSAMAND', '631': 'RAMANAGARA', '583': 'RAMANATHAPURAM', '621': 'RAMBAN', '607': 'RAMGARH', '176': 'RAMPUR', '339': 'RANCHI', '518': 'RANGA REDDY', '731': 'RANIPET', '423': 'RATLAM', '492': 'RATNAGIRI', '370': 'RAYAGADA', '627': 'REASI', '424': 'REWA', '72': 'REWARI', '276': 'RI BHOI', '73': 'ROHTAK', '215': 'ROHTAS', '54': 'RUDRA PRAYAG', '42': 'RUPNAGAR', '608': 'S.A.S NAGAR', '458': 'SABAR KANTHA', '425': 'SAGAR', '177': 'SAHARANPUR', '216': 'SAHARSA', '340': 'SAHEBGANJ', '267': 'SAIHA', '727': 'SAITUAL', '584': 'SALEM', '217': 'SAMASTIPUR', '624': 'SAMBA', '371': 'SAMBALPUR', '659': 'SAMBHAL', '691': 'SANGAREDDY', '493': 'SANGLI', '43': 'SANGRUR', '178': 'SANT KABEER NAGAR', '341': 'SARAIKELA KHARSAWAN', '218': 'SARAN', '494': 'SATARA', '426': 'SATNA', '113': 'SAWAI MADHOPUR', '427': 'SEHORE', '257': 'SENAPATI', '428': 'SEONI', '653': 'SEPAHIJALA', '268': 'SERCHHIP', '671': 'SHAHDARA', '429': 'SHAHDOL', '40': 'SHAHID BHAGAT SINGH NAGAR', '180': 'SHAHJAHANPUR', '430': 'SHAJAPUR', '660': 'SHAMLI', '219': 'SHEIKHPURA', '220': 'SHEOHAR', '431': 'SHEOPUR', '725': 'SHI YOMI', '23': 'SHIMLA', '547': 'SHIVAMOGGA', '432': 'SHIVPURI', '625': 'SHOPIAN', '181': 'SHRAVASTI', '679': 'SIANG', '182': 'SIDDHARTH NAGAR', '692': 'SIDDIPET', '433': 'SIDHI', '114': 'SIKAR', '342': 'SIMDEGA', '495': 'SINDHUDURG', '638': 'SINGRAULI', '24': 'SIRMAUR', '115': 'SIROHI', '74': 'SIRSA', '221': 'SITAMARHI', '183': 'SITAPUR', '585': 'SIVAGANGA', '300': 'SIVASAGAR', '222': 'SIWAN', '25': 'SOLAN', '496': 'SOLAPUR', '184': 'SONBHADRA', '372': 'SONEPUR', '75': 'SONIPAT', '301': 'SONITPUR', '83': 'SOUTH', '602': 'SOUTH ANDAMANS', '227': 'SOUTH DISTRICT', '670': 'SOUTH EAST', '277': 'SOUTH GARO HILLS', '552': 'SOUTH GOA', '707': 'SOUTH SALMARA MANCACHAR', '271': 'SOUTH TRIPURA', '84': 'SOUTH WEST', '663': 'SOUTH WEST GARO HILLS', '658': 'SOUTH WEST KHASI HILLS', '515': 'SPSR NELLORE', '39': 'SRI MUKTSAR SAHIB', '519': 'SRIKAKULAM', '13': 'SRINAGAR', '642': 'SUKMA', '185': 'SULTANPUR', '373': 'SUNDARGARH', '223': 'SUPAUL', '648': 'SURAJPUR', '459': 'SURAT', '460': 'SURENDRANAGAR', '389': 'SURGUJA', '696': 'SURYAPET', '258': 'TAMENGLONG', '641': 'TAPI', '609': 'TARN TARAN', '238': 'TAWANG', '55': 'TEHRI GARHWAL', '716': 'TENGNOUPAL', '733': 'TENKASI', '497': 'THANE', '586': 'THANJAVUR', '587': 'THE NILGIRIS', '588': 'THENI', '589': 'THIRUVALLUR', '565': 'THIRUVANANTHAPURAM', '590': 'THIRUVARUR', '259': 'THOUBAL', '566': 'THRISSUR', '434': 'TIKAMGARH', '302': 'TINSUKIA', '239': 'TIRAP', '591': 'TIRUCHIRAPPALLI', '592': 'TIRUNELVELI', '732': 'TIRUPATHUR', '634': 'TIRUPPUR', '593': 'TIRUVANNAMALAI', '116': 'TONK', '249': 'TUENSANG', '548': 'TUMAKURU', '594': 'TUTICORIN', '117': 'UDAIPUR', '617': 'UDALGURI', '56': 'UDAM SINGH NAGAR', '14': 'UDHAMPUR', '549': 'UDUPI', '435': 'UJJAIN', '260': 'UKHRUL', '436': 'UMARIA', '26': 'UNA', '655': 'UNAKOTI', '186': 'UNNAO', '240': 'UPPER SIANG', '241': 'UPPER SUBANSIRI', '57': 'UTTAR KASHI', '550': 'UTTARA KANNADA', '461': 'VADODARA', '224': 'VAISHALI', '462': 'VALSAD', '187': 'VARANASI', '595': 'VELLORE', '437': 'VIDISHA', '530': 'VIJAYAPURA', '698': 'VIKARABAD', '596': 'VILLUPURAM', '597': 'VIRUDHUNAGAR', '520': 'VISAKHAPATANAM', '521': 'VIZIANAGARAM', '693': 'WANAPARTHY', '522': 'WARANGAL RURAL', '686': 'WARANGAL URBAN', '498': 'WARDHA', '499': 'WASHIM', '567': 'WAYANAD', '85': 'WEST', '228': 'WEST DISTRICT', '278': 'WEST GARO HILLS', '523': 'WEST GODAVARI', '275': 'WEST JAINTIA HILLS', '242': 'WEST KAMENG', '710': 'WEST KARBI ANGLONG', '279': 'WEST KHASI HILLS', '243': 'WEST SIANG', '343': 'WEST SINGHBHUM', '272': 'WEST TRIPURA', '250': 'WOKHA', '504': 'Y.S.R.', '697': 'YADADRI BHUVANAGIRI', '635': 'YADGIR', '76': 'YAMUNANAGAR', '601': 'YANAM', '500': 'YAVATMAL', '251': 'ZUNHEBOTO'}
+    #}}}
+    return distDictionary[distCode] 
+    #}}}
+
+#{{{findDistrictReverse(distCodeString) returns the distict as string
+def findDistrictReverse(distCodeString):
+   #{{{ dist dict 
+    distDictionary = {'303': '24 PARAGANAS NORTH', '304': '24 PARAGANAS SOUTH', '501': 'ADILABAD', '667': 'AGAR MALWA', '118': 'AGRA', '438': 'AHMADABAD', '466': 'AHMEDNAGAR', '261': 'AIZAWL', '86': 'AJMER', '467': 'AKOLA', '554': 'ALAPPUZHA', '119': 'ALIGARH', '664': 'ALIPURDUAR', '639': 'ALIRAJPUR', '45': 'ALMORA', '87': 'ALWAR', '58': 'AMBALA', '121': 'AMBEDKAR NAGAR', '640': 'AMETHI', '468': 'AMRAVATI', '439': 'AMRELI', '27': 'AMRITSAR', '154': 'AMROHA', '440': 'ANAND', '502': 'ANANTAPUR', '1': 'ANANTNAG', '628': 'ANJAW', '344': 'ANUGUL', '390': 'ANUPPUR', '188': 'ARARIA', '610': 'ARIYALUR', '672': 'ARVALLI', '611': 'ARWAL', '391': 'ASHOKNAGAR', '122': 'AURAIYA', '189': 'AURANGABAD', '469': 'AURANGABAD', '140': 'AYODHYA', '123': 'AZAMGARH', '524': 'BAGALKOTE', '46': 'BAGESHWAR', '124': 'BAGHPAT', '125': 'BAHRAICH', '616': 'BAKSA', '392': 'BALAGHAT', '345': 'BALANGIR', '346': 'BALESHWAR', '528': 'BALLARI', '126': 'BALLIA', '646': 'BALOD', '644': 'BALODA BAZAR', '127': 'BALRAMPUR', '649': 'BALRAMPUR', '441': 'BANAS KANTHA', '128': 'BANDA', '623': 'BANDIPORA', '190': 'BANKA', '305': 'BANKURA', '88': 'BANSWARA', '129': 'BARABANKI', '3': 'BARAMULLA', '89': 'BARAN', '130': 'BAREILLY', '347': 'BARGARH', '90': 'BARMER', '605': 'BARNALA', '280': 'BARPETA', '393': 'BARWANI', '374': 'BASTAR', '131': 'BASTI', '28': 'BATHINDA', '470': 'BEED', '191': 'BEGUSARAI', '527': 'BELAGAVI', '650': 'BEMETARA', '526': 'BENGALURU RURAL', '525': 'BENGALURU URBAN', '394': 'BETUL', '179': 'BHADOHI', '690': 'BHADRADRI KOTHAGUDEM', '348': 'BHADRAK', '192': 'BHAGALPUR', '471': 'BHANDARA', '91': 'BHARATPUR', '442': 'BHARUCH', '443': 'BHAVNAGAR', '92': 'BHILWARA', '395': 'BHIND', '59': 'BHIWANI', '193': 'BHOJPUR', '396': 'BHOPAL', '529': 'BIDAR', '636': 'BIJAPUR', '132': 'BIJNOR', '93': 'BIKANER', '15': 'BILASPUR', '375': 'BILASPUR', '307': 'BIRBHUM', '252': 'BISHNUPUR', '705': 'BISWANATH', '322': 'BOKARO', '281': 'BONGAIGAON', '676': 'BOTAD', '349': 'BOUDH', '133': 'BUDAUN', '2': 'BUDGAM', '134': 'BULANDSHAHR', '472': 'BULDHANA', '94': 'BUNDI', '397': 'BURHANPUR', '194': 'BUXAR', '282': 'CACHAR', '77': 'CENTRAL', '531': 'CHAMARAJANAGARA', '16': 'CHAMBA', '47': 'CHAMOLI', '48': 'CHAMPAWAT', '262': 'CHAMPHAI', '135': 'CHANDAULI', '253': 'CHANDEL', '44': 'CHANDIGARH', '473': 'CHANDRAPUR', '229': 'CHANGLANG', '708': 'CHARAIDEO', '701': 'CHARKI DADRI', '323': 'CHATRA', '730': 'CHENGALPATTU', '568': 'CHENNAI', '398': 'CHHATARPUR', '399': 'CHHINDWARA', '668': 'CHHOTAUDEPUR', '630': 'CHIKKABALLAPURA', '532': 'CHIKKAMAGALURU', '612': 'CHIRANG', '533': 'CHITRADURGA', '136': 'CHITRAKOOT', '503': 'CHITTOOR', '95': 'CHITTORGARH', '254': 'CHURACHANDPUR', '96': 'CHURU', '569': 'COIMBATORE', '308': 'COOCHBEHAR', '570': 'CUDDALORE', '350': 'CUTTACK', '465': 'DADRA AND NAGAR HAVELI', '534': 'DAKSHINA KANNADA', '463': 'DAMAN', '400': 'DAMOH', '444': 'DANG', '376': 'DANTEWADA', '195': 'DARBHANGA', '309': 'DARJEELING', '283': 'DARRANG', '401': 'DATIA', '97': 'DAUSA', '535': 'DAVANGERE', '49': 'DEHRADUN', '351': 'DEOGARH', '324': 'DEOGHAR', '137': 'DEORIA', '674': 'DEVBHUMI DWARKA', '402': 'DEWAS', '269': 'DHALAI', '377': 'DHAMTARI', '325': 'DHANBAD', '403': 'DHAR', '571': 'DHARMAPURI', '536': 'DHARWAD', '284': 'DHEMAJI', '352': 'DHENKANAL', '98': 'DHOLPUR', '285': 'DHUBRI', '474': 'DHULE', '230': 'DIBANG VALLEY', '286': 'DIBRUGARH', '299': 'DIMA HASAO', '244': 'DIMAPUR', '310': 'DINAJPUR DAKSHIN', '311': 'DINAJPUR UTTAR', '572': 'DINDIGUL', '404': 'DINDORI', '464': 'DIU', '4': 'DODA', '445': 'DOHAD', '326': 'DUMKA', '99': 'DUNGARPUR', '378': 'DURG', '78': 'EAST', '225': 'EAST DISTRICT', '273': 'EAST GARO HILLS', '505': 'EAST GODAVARI', '657': 'EAST JAINTIA HILLS', '231': 'EAST KAMENG', '274': 'EAST KHASI HILLS', '405': 'EAST NIMAR', '232': 'EAST SIANG', '327': 'EAST SINGHBUM', '555': 'ERNAKULAM', '573': 'ERODE', '138': 'ETAH', '139': 'ETAWAH', '60': 'FARIDABAD', '29': 'FARIDKOT', '141': 'FARRUKHABAD', '61': 'FATEHABAD', '30': 'FATEHGARH SAHIB', '142': 'FATEHPUR', '651': 'FAZILKA', '143': 'FIROZABAD', '31': 'FIROZEPUR', '537': 'GADAG', '475': 'GADCHIROLI', '353': 'GAJAPATI', '626': 'GANDERBAL', '446': 'GANDHINAGAR', '100': 'GANGANAGAR', '354': 'GANJAM', '328': 'GARHWA', '645': 'GARIYABAND', '144': 'GAUTAM BUDDHA NAGAR', '196': 'GAYA', '145': 'GHAZIABAD', '146': 'GHAZIPUR', '675': 'GIR SOMNATH', '329': 'GIRIDIH', '287': 'GOALPARA', '330': 'GODDA', '288': 'GOLAGHAT', '654': 'GOMATI', '147': 'GONDA', '476': 'GONDIA', '197': 'GOPALGANJ', '148': 'GORAKHPUR', '331': 'GUMLA', '406': 'GUNA', '506': 'GUNTUR', '32': 'GURDASPUR', '62': 'GURUGRAM', '407': 'GWALIOR', '289': 'HAILAKANDI', '17': 'HAMIRPUR', '149': 'HAMIRPUR', '101': 'HANUMANGARH', '661': 'HAPUR', '408': 'HARDA', '150': 'HARDOI', '50': 'HARIDWAR', '539': 'HASSAN', '163': 'HATHRAS', '540': 'HAVERI', '332': 'HAZARIBAGH', '477': 'HINGOLI', '63': 'HISAR', '726': 'HNAHTHIAL', '709': 'HOJAI', '312': 'HOOGHLY', '409': 'HOSHANGABAD', '33': 'HOSHIARPUR', '313': 'HOWRAH', '507': 'HYDERABAD', '556': 'IDUKKI', '255': 'IMPHAL EAST', '256': 'IMPHAL WEST', '999': 'INDIA', '410': 'INDORE', '411': 'JABALPUR', '355': 'JAGATSINGHAPUR', '681': 'JAGITIAL', '102': 'JAIPUR', '103': 'JAISALMER', '356': 'JAJAPUR', '34': 'JALANDHAR', '151': 'JALAUN', '478': 'JALGAON', '479': 'JALNA', '104': 'JALORE', '314': 'JALPAIGURI', '5': 'JAMMU', '447': 'JAMNAGAR', '333': 'JAMTARA', '198': 'JAMUI', '689': 'JANGOAN', '379': 'JANJGIR-CHAMPA', '380': 'JASHPUR', '152': 'JAUNPUR', '687': 'JAYASHANKAR BHUPALAPALLY', '199': 'JEHANABAD', '412': 'JHABUA', '64': 'JHAJJAR', '105': 'JHALAWAR', '153': 'JHANSI', '703': 'JHARGRAM', '357': 'JHARSUGUDA', '106': 'JHUNJHUNU', '65': 'JIND', '713': 'JIRIBAM', '107': 'JODHPUR', '695': 'JOGULAMBA GADWAL', '290': 'JORHAT', '448': 'JUNAGADH', '382': 'KABIRDHAM', '449': 'KACHCHH', '200': 'KAIMUR (BHABUA)', '66': 'KAITHAL', '711': 'KAKCHING', '538': 'KALABURAGI', '358': 'KALAHANDI', '702': 'KALIMPONG', '729': 'KALLAKURICHI', '685': 'KAMAREDDY', '717': 'KAMJONG', '718': 'KAMLE', '291': 'KAMRUP', '618': 'KAMRUP METRO', '574': 'KANCHIPURAM', '359': 'KANDHAMAL', '712': 'KANGPOKPI', '18': 'KANGRA', '381': 'KANKER', '155': 'KANNAUJ', '575': 'KANNIYAKUMARI', '557': 'KANNUR', '156': 'KANPUR DEHAT', '157': 'KANPUR NAGAR', '35': 'KAPURTHALA', '598': 'KARAIKAL', '108': 'KARAULI', '292': 'KARBI ANGLONG', '6': 'KARGIL', '293': 'KARIMGANJ', '508': 'KARIMNAGAR', '67': 'KARNAL', '576': 'KARUR', '558': 'KASARAGOD', '633': 'KASGANJ', '7': 'KATHUA', '201': 'KATIHAR', '413': 'KATNI', '158': 'KAUSHAMBI', '360': 'KENDRAPARA', '361': 'KENDUJHAR', '202': 'KHAGARIA', '509': 'KHAMMAM', '414': 'KHARGONE', '728': 'KHAWZAWL', '450': 'KHEDA', '159': 'KHERI', '362': 'KHORDHA', '652': 'KHOWAI', '606': 'KHUNTI', '19': 'KINNAUR', '614': 'KIPHIRE', '203': 'KISHANGANJ', '620': 'KISHTWAR', '541': 'KODAGU', '334': 'KODERMA', '245': 'KOHIMA', '294': 'KOKRAJHAR', '542': 'KOLAR', '263': 'KOLASIB', '480': 'KOLHAPUR', '315': 'KOLKATA', '559': 'KOLLAM', '643': 'KONDAGAON', '543': 'KOPPAL', '363': 'KORAPUT', '383': 'KORBA', '384': 'KOREA', '109': 'KOTA', '560': 'KOTTAYAM', '561': 'KOZHIKODE', '677': 'KRA  DAADI', '510': 'KRISHNA', '577': 'KRISHNAGIRI', '622': 'KULGAM', '20': 'KULLU', '699': 'KUMURAM BHEEM ASIFABAD', '8': 'KUPWARA', '511': 'KURNOOL', '68': 'KURUKSHETRA', '233': 'KURUNG KUMEY', '160': 'KUSHI NAGAR', '21': 'LAHUL AND SPITI', '295': 'LAKHIMPUR', '204': 'LAKHISARAI', '553': 'LAKSHADWEEP DISTRICT', '161': 'LALITPUR', '335': 'LATEHAR', '481': 'LATUR', '264': 'LAWNGTLAI', '9': 'LEH LADAKH', '724': 'LEPARADA', '336': 'LOHARDAGA', '234': 'LOHIT', '666': 'LONGDING', '615': 'LONGLENG', '235': 'LOWER DIBANG VALLEY', '719': 'LOWER SIANG', '236': 'LOWER SUBANSIRI', '162': 'LUCKNOW', '36': 'LUDHIANA', '265': 'LUNGLEI', '205': 'MADHEPURA', '206': 'MADHUBANI', '578': 'MADURAI', '688': 'MAHABUBABAD', '512': 'MAHABUBNAGAR', '164': 'MAHARAJGANJ', '385': 'MAHASAMUND', '599': 'MAHE', '69': 'MAHENDRAGARH', '451': 'MAHESANA', '669': 'MAHISAGAR', '165': 'MAHOBA', '166': 'MAINPURI', '706': 'MAJULI', '562': 'MALAPPURAM', '316': 'MALDAH', '364': 'MALKANGIRI', '266': 'MAMIT', '684': 'MANCHERIAL', '22': 'MANDI', '415': 'MANDLA', '416': 'MANDSAUR', '544': 'MANDYA', '37': 'MANSA', '296': 'MARIGAON', '167': 'MATHURA', '168': 'MAU', '365': 'MAYURBHANJ', '513': 'MEDAK', '700': 'MEDCHAL MALKAJGIRI', '317': 'MEDINIPUR EAST', '318': 'MEDINIPUR WEST', '169': 'MEERUT', '170': 'MIRZAPUR', '38': 'MOGA', '246': 'MOKOKCHUNG', '247': 'MON', '171': 'MORADABAD', '673': 'MORBI', '417': 'MORENA', '720': 'MULUGU', '482': 'MUMBAI', '483': 'MUMBAI SUBURBAN', '647': 'MUNGELI', '207': 'MUNGER', '319': 'MURSHIDABAD', '172': 'MUZAFFARNAGAR', '208': 'MUZAFFARPUR', '545': 'MYSURU', '366': 'NABARANGPUR', '320': 'NADIA', '297': 'NAGAON', '579': 'NAGAPATTINAM', '694': 'NAGARKURNOOL', '110': 'NAGAUR', '484': 'NAGPUR', '51': 'NAINITAL', '209': 'NALANDA', '298': 'NALBARI', '514': 'NALGONDA', '580': 'NAMAKKAL', '678': 'NAMSAI', '485': 'NANDED', '486': 'NANDURBAR', '721': 'NARAYANPET', '637': 'NARAYANPUR', '452': 'NARMADA', '418': 'NARSINGHPUR', '487': 'NASHIK', '453': 'NAVSARI', '210': 'NAWADA', '367': 'NAYAGARH', '419': 'NEEMUCH', '79': 'NEW DELHI', '603': 'NICOBARS', '680': 'NIRMAL', '722': 'NIWARI', '516': 'NIZAMABAD', '714': 'NONEY', '80': 'NORTH', '632': 'NORTH AND MIDDLE ANDAMAN', '226': 'NORTH DISTRICT', '81': 'NORTH EAST', '656': 'NORTH GARO HILLS', '551': 'NORTH GOA', '270': 'NORTH TRIPURA', '82': 'NORTH WEST', '368': 'NUAPADA', '604': 'NUH', '488': 'OSMANABAD', '723': 'PAKKE KESSANG', '337': 'PAKUR', '563': 'PALAKKAD', '338': 'PALAMU', '665': 'PALGHAR', '111': 'PALI', '619': 'PALWAL', '454': 'PANCH MAHALS', '70': 'PANCHKULA', '71': 'PANIPAT', '420': 'PANNA', '237': 'PAPUM PARE', '489': 'PARBHANI', '704': 'PASCHIM BARDHAMAN', '211': 'PASHCHIM CHAMPARAN', '455': 'PATAN', '564': 'PATHANAMTHITTA', '662': 'PATHANKOT', '41': 'PATIALA', '212': 'PATNA', '52': 'PAURI GARHWAL', '682': 'PEDDAPALLI', '581': 'PERAMBALUR', '613': 'PEREN', '248': 'PHEK', '715': 'PHERZAWL', '173': 'PILIBHIT', '53': 'PITHORAGARH', '600': 'PONDICHERRY', '10': 'POONCH', '456': 'PORBANDAR', '517': 'PRAKASAM', '174': 'PRATAPGARH', '629': 'PRATAPGARH', '120': 'PRAYAGRAJ', '582': 'PUDUKKOTTAI', '11': 'PULWAMA', '490': 'PUNE', '306': 'PURBA BARDHAMAN', '213': 'PURBI CHAMPARAN', '369': 'PURI', '214': 'PURNIA', '321': 'PURULIA', '175': 'RAE BARELI', '546': 'RAICHUR', '491': 'RAIGAD', '386': 'RAIGARH', '387': 'RAIPUR', '421': 'RAISEN', '683': 'RAJANNA SIRCILLA', '422': 'RAJGARH', '457': 'RAJKOT', '388': 'RAJNANDGAON', '12': 'RAJOURI', '112': 'RAJSAMAND', '631': 'RAMANAGARA', '583': 'RAMANATHAPURAM', '621': 'RAMBAN', '607': 'RAMGARH', '176': 'RAMPUR', '339': 'RANCHI', '518': 'RANGA REDDY', '731': 'RANIPET', '423': 'RATLAM', '492': 'RATNAGIRI', '370': 'RAYAGADA', '627': 'REASI', '424': 'REWA', '72': 'REWARI', '276': 'RI BHOI', '73': 'ROHTAK', '215': 'ROHTAS', '54': 'RUDRA PRAYAG', '42': 'RUPNAGAR', '608': 'S.A.S NAGAR', '458': 'SABAR KANTHA', '425': 'SAGAR', '177': 'SAHARANPUR', '216': 'SAHARSA', '340': 'SAHEBGANJ', '267': 'SAIHA', '727': 'SAITUAL', '584': 'SALEM', '217': 'SAMASTIPUR', '624': 'SAMBA', '371': 'SAMBALPUR', '659': 'SAMBHAL', '691': 'SANGAREDDY', '493': 'SANGLI', '43': 'SANGRUR', '178': 'SANT KABEER NAGAR', '341': 'SARAIKELA KHARSAWAN', '218': 'SARAN', '494': 'SATARA', '426': 'SATNA', '113': 'SAWAI MADHOPUR', '427': 'SEHORE', '257': 'SENAPATI', '428': 'SEONI', '653': 'SEPAHIJALA', '268': 'SERCHHIP', '671': 'SHAHDARA', '429': 'SHAHDOL', '40': 'SHAHID BHAGAT SINGH NAGAR', '180': 'SHAHJAHANPUR', '430': 'SHAJAPUR', '660': 'SHAMLI', '219': 'SHEIKHPURA', '220': 'SHEOHAR', '431': 'SHEOPUR', '725': 'SHI YOMI', '23': 'SHIMLA', '547': 'SHIVAMOGGA', '432': 'SHIVPURI', '625': 'SHOPIAN', '181': 'SHRAVASTI', '679': 'SIANG', '182': 'SIDDHARTH NAGAR', '692': 'SIDDIPET', '433': 'SIDHI', '114': 'SIKAR', '342': 'SIMDEGA', '495': 'SINDHUDURG', '638': 'SINGRAULI', '24': 'SIRMAUR', '115': 'SIROHI', '74': 'SIRSA', '221': 'SITAMARHI', '183': 'SITAPUR', '585': 'SIVAGANGA', '300': 'SIVASAGAR', '222': 'SIWAN', '25': 'SOLAN', '496': 'SOLAPUR', '184': 'SONBHADRA', '372': 'SONEPUR', '75': 'SONIPAT', '301': 'SONITPUR', '83': 'SOUTH', '602': 'SOUTH ANDAMANS', '227': 'SOUTH DISTRICT', '670': 'SOUTH EAST', '277': 'SOUTH GARO HILLS', '552': 'SOUTH GOA', '707': 'SOUTH SALMARA MANCACHAR', '271': 'SOUTH TRIPURA', '84': 'SOUTH WEST', '663': 'SOUTH WEST GARO HILLS', '658': 'SOUTH WEST KHASI HILLS', '515': 'SPSR NELLORE', '39': 'SRI MUKTSAR SAHIB', '519': 'SRIKAKULAM', '13': 'SRINAGAR', '642': 'SUKMA', '185': 'SULTANPUR', '373': 'SUNDARGARH', '223': 'SUPAUL', '648': 'SURAJPUR', '459': 'SURAT', '460': 'SURENDRANAGAR', '389': 'SURGUJA', '696': 'SURYAPET', '258': 'TAMENGLONG', '641': 'TAPI', '609': 'TARN TARAN', '238': 'TAWANG', '55': 'TEHRI GARHWAL', '716': 'TENGNOUPAL', '733': 'TENKASI', '497': 'THANE', '586': 'THANJAVUR', '587': 'THE NILGIRIS', '588': 'THENI', '589': 'THIRUVALLUR', '565': 'THIRUVANANTHAPURAM', '590': 'THIRUVARUR', '259': 'THOUBAL', '566': 'THRISSUR', '434': 'TIKAMGARH', '302': 'TINSUKIA', '239': 'TIRAP', '591': 'TIRUCHIRAPPALLI', '592': 'TIRUNELVELI', '732': 'TIRUPATHUR', '634': 'TIRUPPUR', '593': 'TIRUVANNAMALAI', '116': 'TONK', '249': 'TUENSANG', '548': 'TUMAKURU', '594': 'TUTICORIN', '117': 'UDAIPUR', '617': 'UDALGURI', '56': 'UDAM SINGH NAGAR', '14': 'UDHAMPUR', '549': 'UDUPI', '435': 'UJJAIN', '260': 'UKHRUL', '436': 'UMARIA', '26': 'UNA', '655': 'UNAKOTI', '186': 'UNNAO', '240': 'UPPER SIANG', '241': 'UPPER SUBANSIRI', '57': 'UTTAR KASHI', '550': 'UTTARA KANNADA', '461': 'VADODARA', '224': 'VAISHALI', '462': 'VALSAD', '187': 'VARANASI', '595': 'VELLORE', '437': 'VIDISHA', '530': 'VIJAYAPURA', '698': 'VIKARABAD', '596': 'VILLUPURAM', '597': 'VIRUDHUNAGAR', '520': 'VISAKHAPATANAM', '521': 'VIZIANAGARAM', '693': 'WANAPARTHY', '522': 'WARANGAL RURAL', '686': 'WARANGAL URBAN', '498': 'WARDHA', '499': 'WASHIM', '567': 'WAYANAD', '85': 'WEST', '228': 'WEST DISTRICT', '278': 'WEST GARO HILLS', '523': 'WEST GODAVARI', '275': 'WEST JAINTIA HILLS', '242': 'WEST KAMENG', '710': 'WEST KARBI ANGLONG', '279': 'WEST KHASI HILLS', '243': 'WEST SIANG', '343': 'WEST SINGHBHUM', '272': 'WEST TRIPURA', '250': 'WOKHA', '504': 'Y.S.R.', '697': 'YADADRI BHUVANAGIRI', '635': 'YADGIR', '76': 'YAMUNANAGAR', '601': 'YANAM', '500': 'YAVATMAL', '251': 'ZUNHEBOTO'}
+    #}}}
+    keys_list = list(distDictionary.keys())
+    value_list = list(distDictionary.values())
+    distStringIndex = value_list.index(distCodeString)
+    return (keys_list[distStringIndex]) 
+    #}}}
+
+#{{{ findState(stateCode) returns state as a string
+def findState(stateCode):
+    stateDictionay ={'35': 'ANDAMAN AND NICOBAR ISLANDS', '28': 'ANDHRA PRADESH', '12': 'ARUNACHAL PRADESH', '18': 'ASSAM', '10': 'BIHAR', '4': 'CHANDIGARH', '22': 'CHHATTISGARH', '26': 'DADRA AND NAGAR HAVELI', '25': 'DAMAN AND DIU', '7': 'DELHI', '30': 'GOA', '24': 'GUJARAT', '6': 'HARYANA', '2': 'HIMACHAL PRADESH', '1': 'JAMMU AND KASHMIR', '20': 'JHARKHAND', '29': 'KARNATAKA', '32': 'KERALA', '37': 'LADAKH', '31': 'LAKSHADWEEP', '23': 'MADHYA PRADESH', '27': 'MAHARASHTRA', '14': 'MANIPUR', '17': 'MEGHALAYA', '15': 'MIZORAM', '13': 'NAGALAND', '21': 'ODISHA', '34': 'PUDUCHERRY', '3': 'PUNJAB', '8': 'RAJASTHAN', '11': 'SIKKIM', '33': 'TAMIL NADU', '36': 'TELANGANA', '16': 'TRIPURA', '9': 'UTTAR PRADESH', '5': 'UTTARAKHAND', '19': 'WEST BENGAL'}
+    return (stateDictionay[stateCode])
+#}}}
+
+#{{{ findStateReverse(stateCodeString) returns statecode
+def findStateReverse(stateCodeString):
+    stateDictionay ={'35': 'ANDAMAN AND NICOBAR ISLANDS', '28': 'ANDHRA PRADESH', '12': 'ARUNACHAL PRADESH', '18': 'ASSAM', '10': 'BIHAR', '4': 'CHANDIGARH', '22': 'CHHATTISGARH', '26': 'DADRA AND NAGAR HAVELI', '25': 'DAMAN AND DIU', '7': 'DELHI', '30': 'GOA', '24': 'GUJARAT', '6': 'HARYANA', '2': 'HIMACHAL PRADESH', '1': 'JAMMU AND KASHMIR', '20': 'JHARKHAND', '29': 'KARNATAKA', '32': 'KERALA', '37': 'LADAKH', '31': 'LAKSHADWEEP', '23': 'MADHYA PRADESH', '27': 'MAHARASHTRA', '14': 'MANIPUR', '17': 'MEGHALAYA', '15': 'MIZORAM', '13': 'NAGALAND', '21': 'ODISHA', '34': 'PUDUCHERRY', '3': 'PUNJAB', '8': 'RAJASTHAN', '11': 'SIKKIM', '33': 'TAMIL NADU', '36': 'TELANGANA', '16': 'TRIPURA', '9': 'UTTAR PRADESH', '5': 'UTTARAKHAND', '19': 'WEST BENGAL'}
+    keys_list = list(stateDictionay.keys())
+    value_list = list(stateDictionay.values())
+    stateStringIndex = value_list.index(stateCodeString)
+    return (keys_list[stateStringIndex])
+#}}}
+
+#{{{ getPatientCategory(catString) returns patient category as required , input should be the entire data from dataFromSheet[24]
+def getPatientCategory(catString):
+    #split the string
+    print("I am inside Patient cat")
+    reqString = catString.split(":")[0]
+
+
+    #{{{if else statements 
+    if (reqString == "Cat-A1"):
+        patientCat = "NCat1"
+    elif (reqString == "Cat-A2"):
+        patientCat = "NCat2"
+    elif (reqString == "Cat-A3"):
+        patientCat = "NCat3"
+
+
+    elif (reqString == "Cat-B4"):
+        patientCat = "NCat4"
+    elif (reqString == "Cat-B5"):
+        patientCat = "NCat5"
+    elif (reqString == "Cat-B6"):
+        patientCat = "NCat6"
+    elif (reqString == "Cat-B7"):
+        patientCat = "NCat7"
+    elif (reqString == "Cat-B8"):
+        patientCat = "NCat8"
+    
+
+    elif (reqString == "Cat-C9"):
+        patientCat = "NCat9"
+    elif (reqString == "Cat-C10"):
+        patientCat = "NCat10"
+    elif (reqString == "Cat-C11"):
+        patientCat = "NCat11"
+    elif (reqString == "Cat-C12"):
+        patientCat = "NCat12"
+    elif (reqString == "Cat-C13"):
+        patientCat = "NCat13"
+    elif (reqString == "Cat-C14"):
+        patientCat = "NCat14"
+    elif (reqString == "Cat-C15"):
+        patientCat = "NCat15"
+        
+
+    elif (reqString == "Cat-D16"):
+        patientCat = "NCat16"
+    elif (reqString == "Cat-D17"):
+        patientCat = "NCat17"
+    else:
+        patientCat = "NCat17"
+    
+    #}}}
+    print(patientCat)
+    return (patientCat)
+
+#}}}
+
+#{{{ isPatientHospitalized(hospString) returns Yes or No
+def isPatientHospitalized(hospString):
+    
+    print (" I am inside isPatientHospitalized")
+    if (hospString == "No"):
+        reqHospString = "No"
+    else:
+        reqHospString = "Yes"
+
+
+    print(reqHospString)
+    return reqHospString
+
+#}}}
+
+#{{{ getLabKit(labKit) returns the lab kit used
+def getLabKit(labKit):
+    print("I am inside getLabKit")
+
+    # the data in the column  is the name of the kit used, assuming that there will be errors, it should be preprocessed to strip any white spaces and then converted to all upper case 
+    try:
+        whitespaceRegex = re.compile(r'\s+') # regex pattern for catching one or more whitespaces
+        kitWithWhiteSpaceRemoved = re.sub(whitespaceRegex,'',labKit) # substitute the whitespaces with ''
+        kitNameCapitalized = kitWithWhiteSpaceRemoved.upper() # change the string to uppercase
+        print(kitNameCapitalized)
+        if (kitNameCapitalized == "LABGUN"): #Originally its posted value should be 'Labgun'
+            reqLabKit = "Labgun"
+
+            
+        elif(kitNameCapitalized == "FASTRACT"): #Originally its posted value should be 'Fastract_SARS_kit'
+            print("I am inside elif")
+            reqLabKit = "Fastract_SARS_kit"
+
+        elif(kitNameCapitalized == "SDBIOSENSOR"): #Originally its posted value should be 'SD_Biosensor'
+            print("I am inside elif sd biosensor")
+            reqLabKit = "SD_Biosensor"
+
+        elif(kitNameCapitalized == "BIOMERIEUX"): #Originally its posted value should be 'Biomerieux_ARGENE'
+            print("I am inside elif biomerieux")
+            reqLabKit = "Biomerieux_ARGENE"
+
+        elif(kitNameCapitalized == "EXOFAST"): #Originally its posted value should be 'LabGun-tm_ExoFast'
+            print("I am inside elif exofast")
+            reqLabKit = "LabGun-tm_ExoFast"
+        print(reqLabKit)
+    except:
+        pass
+
+    return(reqLabKit)
+#}}}
+
+#{{{ getPage(modeString) return the page parameter to be used
+def getPage(modeString):
+    print("I am inside getPage function")
+    if(modeString == "1"):
+        reqPageString = "add_record"
+    elif(modeString == "2" or modeString == "A"):
+        reqPageString = "edit"
+
+    print(reqPageString)
+    return(reqPageString)
+
+#}}}
+
+#{{{ getSymptomaticStatus(catString) 
+def getSymptomaticStatus(catString):
+    print("I am inside getSymptomaticStatus")
+    patCat = getPatientCategory(catString)
+    if (patCat == "NCat1" or patCat == "NCat4" or patCat == "NCat5" or patCat == "NCat6" or patCat == "NCat7" or patCat == "NCat9" or patCat == "NCat10" or patCat == "NCat14" or patCat == "NCat15"):
+        reqSymStatus = "Symptomatic"
+    else:
+        reqSymStatus = "Asymptomatic"
+
+    print(reqSymStatus)
+    return(reqSymStatus)
+
+#}}}
+
+#{{{getCollectionDate(sampleCdate) returns sample collection date in dd-mm-yyyy hh:mm:ss"
+def getCollectionDate(sampleCdate):
+    print("I am inside getCollectionDate")
+    try:
+        reqColDate = (sampleCdate.split("'")[1].replace("/","-") + " 10:00:00")
+    except:
+        reqColDate = (sampleCdate.replace("/","-") + " 10:00:00") 
+
+    print(reqColDate)
+    return(reqColDate)
+
+#}}}
+
+#{{{ getResultForGene(labKit,result,gene) returns either result or ''
+def getResultForGene(labKit,result,gene):
+    print("I am inside getResultForGene")
+    labKitOriginal = getLabKit(labKit)
+    if (labKitOriginal == "Labgun" or labKitOriginal == "SD_Biosensor" or labKitOriginal == "Biomerieux_ARGENE" or labKitOriginal == "LabGun-tm_ExoFast"):
+        if(gene == "covid19_result_egene" or gene == "rdrp_confirmatory"):
+            #If kits used are labgun, sd_biosensor,biomerieux or exofast then
+            #gene results for egene and rdrp is set to the result declared
+            reqResult = result
+        else:
+            #If kits used are labgun, sd_biosensor,biomerieux or exofast then
+            #gene results for other than egene and rdrp is set to ''
+            reqResult = ''
+
+        #nameValuePairs["ct_value_screening"] = dataFromSheet[5]
+        #nameValuePairs["covid19_result_egene"] = "Positive"
+        #nameValuePairs["ct_value_rdrp"] = dataFromSheet[6]
+        #nameValuePairs["rdrp_confirmatory"] = "Positive"
+
+    elif(labKitOriginal == "Fastract_SARS_kit"):
+        if(gene == "orf1b_confirmatory"):
+            reqResult = result
+        else:
+            reqResult = ''
+
+        #nameValuePairs["orf1b_confirmatory"] = "Positive"
+        #nameValuePairs["ct_value_orf1b"] = dataFromSheet[8]
+    print (reqResult)
+    return reqResult
+#}}}
+
+#{{{ checkIfSrfIdPresent(srf_id): input srf id from csv file; output 0 if srf_id ABSENT output 1 if srf_id PRESENT
+def checkIfSrfIdPresent(srf_id):
+    #print("I am inside checkIfSrfIdPresent")
+
+    #url for cv19 database
+    url = "*******************REDACTED********************"
+    #payload contains srf id
+    payload = {"srf_id":srf_id}
+
+    post = requests.post(url,data=payload,verify=False)
+
+    #response of the cv19 server
+    response = post.text
+    print(srf_id)
+    print(response)
+    #print("\n")
+    return response
+
+    #if cv19 server says 0 then return 0
+
+    #if cv19 server says 1 then return 1
+#}}}
+
+#{{{ checkCsvDataUsingSrf(csvData): input [[a record from csv file]]; output a list of srf ids whose results were already declared
+def checkCsvDataUsingSrf(csvData):
+    print("I am inside checkCsvDataUsingSrf")
+
+    listOfProblematicSrfIds = []
+
+    for i in progressBar(csvData,prefix = 'Progress:', suffix = 'Complete', length = 50):
+    #for i in csvData:
+        
+        srfIdPresence = str(checkIfSrfIdPresent(i[8]))
+        
+        if(srfIdPresence == "0"): #if srf_id is not present in cv19 database 
+            pass
+        elif(srfIdPresence == "1"): #if srf_id is present in cv19 database 
+            listOfProblematicSrfIds.append(i[8])
+
+    print("#########################################################################################")
+    print("-------Summary - SRF ID based Check in cv19microkapv ------------------------------------")
+    
+    if(len(listOfProblematicSrfIds) != 0):
+
+        print("-------The follwoing SRF IDs Results were already fixed kindly verify--------------------")
+        
+        for j in listOfProblematicSrfIds:
+            print(str(j) + "\n")
+        print(" Kindly rectify and proceed and I am quitting for now")
+
+        print("##########################################################################################")
+        return "0"
+    else:
+        print("All SRF IDs in this batch are new, So proceed for next step")
+        print("##########################################################################################")
+        return "1"
+
+#}}}
+
+#{{{ checkIfPatientIdAlreadyFixed(patient_id): input patient id from csv file; output 0 if sample_id ABSENT output 1 if patient_id PRSENT 
+def checkIfPatientIdAlreadyFixed(patient_id):
+    #print("I am inside checkIfPatientIdAlreadyFixed")
+    #url for cv19 database
+    url = "*******************REDACTED********************"
+
+    #payload contains patient_id
+    payload = {"patient_id":patient_id}
+
+    post = requests.post(url,data=payload,verify=False)
+    #response of the cv19 server
+    response = post.text
+    print(response)
+    print(patient_id)
+    return response
+
+    #if cv19 server says 0 then return 0
+
+    #if cv19 server says 1 then return 1
+#}}}
+
+#{{{ checkCsvDataUsingPatientId(csvData): input [[a record from csv file]]; output a list of srf ids whose results were already declared
+def checkCsvDataUsingPatientId(csvData):
+    print("I am inside checkCsvDataUsingPatientId")
+
+    listOfProblematicSrfIds = []
+
+
+    for i in progressBar(csvData,prefix = 'Progress:', suffix = 'Complete', length = 50):
+    #for i in csvData:
+        patientIdPresence = str(checkIfPatientIdAlreadyFixed(i[6]))
+        
+        if(patientIdPresence == "0"): #if srf_id is not present in cv19 database 
+            pass
+        elif(patientIdPresence == "1"): #if srf_id is present in cv19 database 
+            listOfProblematicSrfIds.append([i[6],i[8]])
+
+    print("#########################################################################################")
+    print("-------Summary - Patient ID based Check in cv19microkapv --------------------------------")
+    
+    if(len(listOfProblematicSrfIds) != 0):
+
+        print("-------The follwoing PatientIds were already fixed for the corresponding srf_ids VERIFY--")
+        
+        for j in listOfProblematicSrfIds:
+            print(str(j) + "\n")
+
+        print("##########################################################################################")
+        print(" Kindly rectify and proceed and I am quitting for now")
+        return "0"
+    else:
+        print("All Patient IDs in this batch are new, So proceed for next step")
+
+        print("##########################################################################################")
+        return "1"
+
+#}}}
+
+#{{{ checkSrfIdCorrectness(session,srf_id): input srf_id; output 1 if srf_id is correct, output 0 if srf_id is invalid, output 2 if srf_id is already fetched
+def checkSrfIdCorrectness(session,srf_id):
+    #print("I am inside checkSrfIdCorrectness")
+
+    
+    url = "*******************REDACTED********************"
+    payload = {"srf_id":srf_id,"page":"srf_record"}
+
+    response = session.post(url,data=payload,verify=False) 
+    responseText = response.text
+
+    print(responseText)
+    print(srf_id)
+
+#{{{ Types of responses the webpage provides
+
+#1 "This SRF ID does not exist in our database. Make sure, you have entered the SRF ID correctly."
+
+#2 "Record corresponding to this SRF ID is already fetched and submitted.
+
+#   Lab Name:- GMC, Trichy
+#   Contact Person:- Dr. Dhanapal
+#   Email:- sankaradhana@gmail.com"
+
+#3 "Found#3359100143593------0" 
+#}}}
+    return responseText[0]
+
+
+#}}}
+
+#{{{ checkCsvDataForSrfIdCorrectness(session,csvData): input [[a record from csv file]]; output a list of srf ids which are incorrect and a list of srf id which are already fetched
+def checkCsvDataForSrfIdCorrectness(session, csvData):
+    print("I am inside checkCsvDataForSrfIdCorrectness")
+    
+    listOfIncorrectSrfIds = []
+    listOfFetchedSrfIds = []
+
+
+    for i in progressBar(csvData,prefix = 'Progress:', suffix = 'Complete', length = 50):
+    #for i in csvData:
+        responseFirstLetter = checkSrfIdCorrectness(session,i[8])
+        #The first letters of all the three responses are different so using them for check namely "T" "R" "F"
+        if(responseFirstLetter == "T"):
+            listOfIncorrectSrfIds.append(i[8])
+        elif(responseFirstLetter == "R"):
+            listOfFetchedSrfIds.append(i[8])
+        elif(responseFirstLetter == "F"):
+            pass
+
+    print("##############################################################################################")
+    print("-----------Summary of Correctness, Fetched Status of Srf ids ---------------------------------")
+    print("\n")
+
+    if(len(listOfIncorrectSrfIds) == 0 and len(listOfFetchedSrfIds) == 0):
+        print("---All SRF IDs are correct and all of them are unfetched--------------------------------------")
+        print("##############################################################################################")
+
+        return "1"
+    if(len(listOfIncorrectSrfIds) != 0):
+        print("#####List of INCORRECT SRF IDS ARE AS FOLLOWS ################################################")
+        for i in listOfIncorrectSrfIds:
+            print(str(i) + "\n")
+
+        print("##############################################################################################")
+        print("Kindly rectify and proceed, I am quitting for now")
+
+        return "2"
+    #list of fetched srf_id are not going be listed, reason being, every time when program is due for run in "edit" mode a huge list of fetched srf_ids will be printed and the useful info of incorrect srf_id will be lost
+
+#}}}
+
+#{{{ progressBar (iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
+#https://stackoverflow.com/questions/3173320/text-progress-bar-in-the-console
+
+def progressBar(iterable, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
+    """
+    Call in a loop to create terminal progress bar
+    @params:
+        iteration   - Required  : current iteration (Int)
+        total       - Required  : total iterations (Int)
+        prefix      - Optional  : prefix string (Str)
+        suffix      - Optional  : suffix string (Str)
+        decimals    - Optional  : positive number of decimals in percent complete (Int)
+        length      - Optional  : character length of bar (Int)
+        fill        - Optional  : bar fill character (Str)
+        printEnd    - Optional  : end character (e.g. "\r", "\r\n") (Str)
+    """
+    total = len(iterable)
+    # Progress Bar Printing Function
+    def printProgressBar (iteration):
+        percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+        filledLength = int(length * iteration // total)
+        bar = fill * filledLength + '-' * (length - filledLength)
+        print("\n")
+        print(f'\r{prefix} |{bar}| {percent}% {suffix}', flush=True,end = printEnd)
+    # Initial Call
+    printProgressBar(0)
+    # Update Progress Bar
+    for i, item in enumerate(iterable):
+        yield item
+        printProgressBar(i + 1)
+    # Print New Line on Complete
+    print()
+#}}}
+
+#{{{ Code for doing preliminary check
+#checkIfSrfIdPresent("33591001434931")
+#checkIfPatientIdAlreadyFixed("1451021")
+
+data = getSrfIdSampleIdAndSampleRdate()
+#csvData = getSrfIdSampleIdAndSampleRdate()
+
+print("Do you want to perform if results are declared for srf_id?\n" +
+        "Press 1 to check\n" +
+        "Press 0 to skip\n")
+srf_idBasedCheckNecessity = str(input())
+if(srf_idBasedCheckNecessity == "1"):
+#Check wheather srf_ids results are already declared
+    srf_idBasedCheck = checkCsvDataUsingSrf(data)
+    if(srf_idBasedCheck == "0"): #if there are problematic srf_ids then quit
+        quit()
+    else:
+        print("\nI am proceeding to check sample ids\n")
+
+elif(srf_idBasedCheckNecessity == "0"):
+    print("Skipping srf_id result declartion step")
+    pass
+
+
+print("Do you want to perform if the patient_id are already fixed to someother srf_id?\n" +
+        "Press 1 to check\n" +
+        "Press 0 to skip\n")
+patient_idBasedCheckNecessity = str(input())
+if(patient_idBasedCheckNecessity == "1"):
+#Check wheather patient_ids are not fixed to any other previous srf_ids
+    patient_idBasedCheck = checkCsvDataUsingPatientId(data)
+    if(patient_idBasedCheck == "0"): #if some sample id in this batch is fixed for another srf_id before then quit
+        quit()
+    else:
+        print("\nI am proceeding to check the correctness and fetch status of srf_ids from ICMR database\n")
+
+elif(patient_idBasedCheckNecessity == "0"):
+    print("Skipping patient_id fixation step")
+    pass
+
+#}}}
+
+print("Press 1 to proceed to check srf_id correctness with ICMR \n" +
+        "Press 0 to skip the check\n")
+
+srf_idCorrectnessCheckRequirement = str(input())
+
+#Irrespective of wheather the check is going to be performed or not the program logs in to the ICMR website
+session = requests.Session()
+loginFunction(session)
+
+
+#checkSrfIdCorrectness(session,"3359100143593")
+if(srf_idCorrectnessCheckRequirement == "1"):
+    srf_idCorrectnessStatus = checkCsvDataForSrfIdCorrectness(session,data)
+    if(srf_idCorrectnessStatus == "2"):
+        quit()
+
+#Logout here 
+logoutUrl = "*******************REDACTED********************"
+payloadLogout = {}
+logoutResponse = session.post(logoutUrl,data = payloadLogout,verify=False)
+print("I am logging out here")
+print(logoutResponse.text)
+
+print("Do you want to quit now\n" +
+        "Press 1 to quit\n" +
+        "Press 0 to proceed\n")
+quitting = str(input())
+if(quitting == "1"):
+    quit()
+elif(quitting == "0"):
+    print("I am proceeding further")
+    pass
+
+#quit()
+
+parameterPrint = 'You have chosed to run the program with followingn parameters \n'# this string will be used to print the parameters that the user has chosen to run
+print("Enter The Mode In Which You Want Run? \n Press 1 for add_record \n Press 2 to edit \n Press A to edit only with ICMR")
+program_mode = str(input())
+
+parameterPrint = parameterPrint + "program_mode\t = \t" + program_mode + "\n"
+
+print("Which parameter do you want to use check if the result is already declared? \n Press 1 for SRF_ID \n Press 2 for PATIENT_ID")
+check_parameter = input()
+parameterPrint = parameterPrint + "Parameter used for checking\t = \t" + check_parameter + "\n"
+
+print("Enter The delay(in milliseconds) you want")
+loop_delay = input()
+parameterPrint = parameterPrint + "delay\t = \t" + loop_delay + "\n"
+
+if(program_mode == '2' or program_mode == 'A'):#if the user chooses to edit the record alone he will be prompted to send smses
+
+    print("Enter Do you want to send SMS? \n Press 0 for NO sms \n Press 1 to Send Sms")
+    sms = str(input())
+    if(sms == '0'):
+        smsString = 'NO'
+        parameterPrint = parameterPrint + "send sms\t = \t" + smsString + "\n"
+        smsServer = '0' # to pass on to the function coreFunction
+    elif (sms == '1'):
+        smsString = 'YES'
+        parameterPrint = parameterPrint + "send sms\t = \t" + smsString + "\n"
+        print("Which SMS server do you want to use?" 
+                "\n Press 1 for BSNL" 
+                "\n Press 2 for ICMR"
+                "\n Press 3 for MYGOVT"
+                "\n Press 4 for ABM")
+        smsServer = str(input())
+        if(smsServer == '1'):
+            smsServerString = 'BSNL'
+            parameterPrint = parameterPrint + "sms server\t = \t" + smsServerString + "\n"
+        elif(smsServer == '2'):
+            smsServerString = 'ICMR'
+            parameterPrint = parameterPrint + "sms server\t = \t" + smsServerString + "\n"
+        elif(smsServer == '3'):
+            smsServerString = 'MYGOVT'
+            parameterPrint = parameterPrint + "sms server\t = \t" + smsServerString + "\n"
+        elif(smsServer == '4'):
+            smsServerString = 'ABM'
+            parameterPrint = parameterPrint + "sms server\t = \t" + smsServerString + "\n"
+#print what the user has chosen
+
+print("##############################################\n")
+print(parameterPrint)
+print("##############################################\n")
+
+print("To Proceed press 1\n")
+confirmation = str(input())
+
+if(confirmation != '1'):
+    quit()
+
+
+session = requests.Session()
+loginFunction(session) #logs into the website
+
+#data = getSrfIdSampleIdAndSampleRdate()
+sampleIdsNotEdited = []
+srfIdsNotAdded = []
+resultAlreadyDeclared = []
+toReRun = []
+idsAlreadyPresent = []
+j = 1
+noOfEntries = len(data)
+
+
+#for i in progressBar(data,prefix = 'Progress:', suffix = 'Complete', length = 50):
+for i in data:
+    print (f"Working on {i[6]}")
+    print (f"{j} of {noOfEntries}")
+    if (program_mode == '2'):
+        try:
+            resultOfCoreFunction = (coreFunction(session,i,program_mode,sms,smsServer,check_parameter))
+            print (resultOfCoreFunction)
+            if (resultOfCoreFunction[0] == "Failed"):
+                toReRun.append(i[6])
+            elif (resultOfCoreFunction[0] == "RAD"): #if for this srf_id result was already declared then the resultAlreadyDeclared is updated
+                resultAlreadyDeclared.append(i[6])
+            elif(resultOfCoreFunction[0] == "RDU"): #if the remote database is unreachble the function would have returned, even the icmr database would not have been updated, so these numbers can be rerun with the same program
+                toReRun.append(i[6])
+            
+        except: # if the patient record not found then the program goes to the next row
+            print("Return Value Not Known")
+            sampleIdsNotEdited.append(i[6])
+            pass
+
+    elif (program_mode == 'A'):
+        try:
+            resultOfCoreFunction = (coreFunction(session,i,program_mode,sms,smsServer,check_parameter))
+            print (resultOfCoreFunction)
+            if (resultOfCoreFunction[0] == "Failed"):
+                sampleIdsNotEdited.append(i[6])
+        except:
+            print("Return Value Not Known")
+            sampleIdsNotEdited.append(i[6])
+            pass
+
+    elif (program_mode == '1'):
+        try:
+            resultOfCoreFunction = coreFunction(session,i,program_mode,'0','0',check_parameter)
+            print (resultOfCoreFunction)
+            if (resultOfCoreFunction[0] == "Failed"):
+                srfIdsNotAdded.append(i[6])
+            elif (resultOfCoreFunction[0] == "AF"):
+                idsAlreadyPresent.append(i[6])
+            elif (resultOfCoreFunction[0] == "RAD"):
+                resultAlreadyDeclared.append(i[6])
+
+
+        except :
+            sampleIdsNotEdited.append(i[6])
+        #While adding records there are no sms going to be sent. So no need for delay
+        loop_delay = 0
+
+    print (f"----------------END OF  A SAMPLE---------------------\n")
+    j = j + 1
+
+    # Added to restrict the number of sms calls
+    print(f"Going to sleep for {loop_delay} milliseconds")
+    time.sleep(float(loop_delay)/1000)
+    print("Woke up from sleep")
+
+
+if program_mode == '2' or program_mode == 'A':
+    print ("\n ---------------------Summary of Editing----------------")
+    if len(sampleIdsNotEdited) == 0:
+        print("All entries edited accordingly")
+    elif len(sampleIdsNotEdited) != 0:
+        print ("The following sample Ids could not be edited try running with mode 'A'")
+        print (sampleIdsNotEdited)
+
+    if(len(resultAlreadyDeclared) != 0):
+        print("Results have already been declared for the follwoing Sample ids")
+        print(resultAlreadyDeclared)
+    if(len(toReRun) != 0):
+        print("Please rerun the following sample ids in mode 2 itself")
+        print(toReRun)
+
+elif program_mode == '1':
+    print ("\n --------------------Summary of Data Additon ------------")
+    if len(srfIdsNotAdded) == 0:
+        print("All entries ADDED successfully")
+    elif len(srfIdsNotAdded) != 0:
+        print ("The following sample Ids could not be added")
+        print (srfIdsNotAdded)
+
+    if(len(idsAlreadyPresent) != 0):
+        print ("The following samples ids already exist in ICMR database, kindly verify if they are correctly matched to SRF IDs")
+        print (idsAlreadyPresent)
+    if(len(resultAlreadyDeclared) != 0):
+        print("Results have already been declared for the follwoing SRF ids")
+        print(resultAlreadyDeclared)
+    
+
